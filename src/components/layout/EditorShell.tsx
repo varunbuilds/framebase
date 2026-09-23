@@ -15,11 +15,14 @@ const tools = [
 
 export function EditorShell() {
   return (
-    <div className="flex h-full min-h-0 flex-col bg-fb-app text-fb-text">
+    <div className="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-fb-app text-fb-text">
       <TopToolbar />
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1">
-          <nav className="flex w-16 shrink-0 flex-col items-center gap-2 border-r border-fb-border bg-fb-panel pt-4" aria-label="Editor tools">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          <nav
+            className="flex w-16 shrink-0 flex-col items-center gap-2 overflow-hidden border-r border-fb-border bg-fb-panel pt-4"
+            aria-label="Editor tools"
+          >
             {tools.map(({ label, Icon, active }) => (
               <button
                 key={label}
@@ -33,7 +36,7 @@ export function EditorShell() {
             ))}
           </nav>
           <MediaPanel />
-          <div className="flex min-h-0 min-w-0 flex-1">
+          <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
             <PreviewPanel />
           </div>
         </div>

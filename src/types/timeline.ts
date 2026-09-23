@@ -11,15 +11,18 @@ export type MediaAvailability = 'ready' | 'missing' | 'loading' | 'error'
 export interface MediaSource {
   id: string
   name: string
+  /** Primary library kind (video if the file has a video stream, else audio). */
   kind: MediaKind
+  /** Whether the file contains a video stream. */
+  hasVideo: boolean
+  /** Whether the file contains an audio stream. */
+  hasAudio: boolean
   durationMs: TimeMs
   mimeType: string
   width?: number
   height?: number
   sampleRate?: number
   channelCount?: number
-  /** Paired audio/video source from the same imported file, when available. */
-  linkedMediaSourceId?: string
   availability: MediaAvailability
   importedAt: string
 }
@@ -37,6 +40,9 @@ export interface Track {
  * A timeline instance of a media source.
  * `sourceInMs` / `sourceOutMs` are relative to the source.
  * `timelineStartMs` is the placement on the sequence.
+ *
+ * An AV file is one MediaSource in the library; placing it may create both a
+ * video-track clip and an audio-track clip that share the same mediaSourceId.
  */
 export interface Clip {
   id: string

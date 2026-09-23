@@ -33,7 +33,6 @@ export function MediaPanel() {
         continue
       }
       registerMediaSource(result.source)
-      if (result.linkedAudioSource) registerMediaSource(result.linkedAudioSource)
     }
 
     setImportStatus('idle')
@@ -41,8 +40,8 @@ export function MediaPanel() {
   }
 
   return (
-    <aside className="flex h-full min-h-0 w-[360px] shrink-0 flex-col border-r border-fb-border bg-fb-panel">
-      <div className="flex h-11 items-center justify-between px-3">
+    <aside className="flex h-full min-h-0 w-[360px] shrink-0 flex-col overflow-hidden border-r border-fb-border bg-fb-panel">
+      <div className="flex h-11 shrink-0 items-center justify-between px-3">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
           Media
         </h2>
@@ -70,9 +69,9 @@ export function MediaPanel() {
         {mediaSources.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center">
             <Film size={20} className="text-fb-subtle" strokeWidth={1.5} />
-            <p className="text-[12px] font-medium text-fb-text">Import your media</p>
+            <p className="text-[12px] font-medium text-fb-text">Import your media here.</p>
             <p className="text-[11px] leading-relaxed text-fb-muted">
-              Drag files here, or use Import to add local video and audio.
+              Drag files or use the Import button to add media here.
             </p>
           </div>
         ) : (
@@ -115,8 +114,16 @@ export function MediaPanel() {
                           </span>
                         )}
                       </span>
-                      <span className="mt-1.5 block truncate px-0.5 text-[11px] font-medium text-fb-text">
-                          {source.name}
+                      <span className="mt-1.5 flex items-center gap-1 truncate px-0.5 text-[11px] font-medium text-fb-text">
+                        <span className="truncate">{source.name}</span>
+                        {source.hasVideo && source.hasAudio && (
+                          <span
+                            className="shrink-0 rounded bg-white/[0.08] px-1 text-[9px] font-semibold uppercase tracking-wide text-fb-muted"
+                            title="Contains video and audio"
+                          >
+                            A/V
+                          </span>
+                        )}
                       </span>
                     </button>
                     <div className="absolute top-2 right-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100">

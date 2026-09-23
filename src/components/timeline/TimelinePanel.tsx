@@ -1,5 +1,13 @@
 import { Film, Music2, ZoomIn, ZoomOut } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
+import { AudioWaveform } from '@/components/timeline/AudioWaveform'
 import {
   getMediaSourceById,
   getSortedTracks,
@@ -10,9 +18,27 @@ import { getObjectUrl } from '@/lib/media/object-urls'
 import type { Clip, Track } from '@/types/timeline'
 import { clamp, formatTimecode } from '@/utils/time'
 
-const TRACK_HEIGHT = 72
+const TRACK_HEIGHT = 104
 const RULER_HEIGHT = 28
 const LABEL_WIDTH = 88
+const TIMELINE_MIN_HEIGHT = 220
+const TIMELINE_MAX_HEIGHT = 720
+/** Leave room for the toolbar + a usable preview region. */
+const MIN_UPPER_AREA_PX = 200
+const TOOLBAR_HEIGHT_PX = 44
+
+function getTimelineHeightMax(): number {
+  if (typeof window === 'undefined') return TIMELINE_MAX_HEIGHT
+  const viewportMax = window.innerHeight - TOOLBAR_HEIGHT_PX - MIN_UPPER_AREA_PX
+  return Math.max(
+    TIMELINE_MIN_HEIGHT,
+    Math.min(TIMELINE_MAX_HEIGHT, viewportMax),
+  )
+}
+
+function clampTimelineHeight(height: number): number {
+  return clamp(Math.round(height), TIMELINE_MIN_HEIGHT, getTimelineHeightMax())
+}
 
 function msToPx(ms: number, pixelsPerSecond: number): number {
   return (ms / 1000) * pixelsPerSecond
@@ -172,6 +198,15 @@ function TimelineClipBlock({
     >
       {isVideo && objectUrl ? (
         <VideoFilmstrip src={objectUrl} durationMs={durationMs} />
+      ) : objectUrl && media ? (
+        <AudioWaveform
+          mediaSourceId={media.id}
+          src={objectUrl}
+          sourceInMs={sourceInMs}
+          sourceOutMs={sourceOutMs}
+          mediaDurationMs={media.durationMs}
+          widthPx={width}
+        />
       ) : (
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
@@ -224,12 +259,16 @@ export function TimelinePanel() {
   const timelineScrollLeft = useEditorStore(
     (state) => state.ui.timelineScrollLeft,
   )
+  const timelineHeightPx = useEditorStore((state) => state.ui.timelineHeightPx)
   const selectedClipId = useEditorStore((state) => state.ui.selectedClipId)
   const clipDrag = useEditorStore((state) => state.clipDrag)
   const seekTo = useEditorStore((state) => state.seekTo)
   const setPixelsPerSecond = useEditorStore((state) => state.setPixelsPerSecond)
   const setTimelineScrollLeft = useEditorStore(
     (state) => state.setTimelineScrollLeft,
+  )
+  const setTimelineHeightPx = useEditorStore(
+    (state) => state.setTimelineHeightPx,
   )
   const selectClip = useEditorStore((state) => state.selectClip)
   const setClipDrag = useEditorStore((state) => state.setClipDrag)
@@ -454,36 +493,101 @@ export function TimelinePanel() {
 
   const playheadLeft = msToPx(playheadMs, pixelsPerSecond)
 
+  const onResizePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return
+      event.preventDefault()
+      const originY = event.clientY
+      const originHeight = timelineHeightPx
+
+      const onMove = (moveEvent: PointerEvent) => {
+        // Dragging the top edge up grows the panel; down shrinks it.
+        const next = originHeight + (originY - moveEvent.clientY)
+        setTimelineHeightPx(clampTimelineHeight(next))
+      }
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    },
+    [setTimelineHeightPx, timelineHeightPx],
+  )
+
+  useEffect(() => {
+    const fitToViewport = () => {
+      const max = getTimelineHeightMax()
+      if (timelineHeightPx > max) {
+        setTimelineHeightPx(max)
+      }
+    }
+    fitToViewport()
+    window.addEventListener('resize', fitToViewport)
+    return () => window.removeEventListener('resize', fitToViewport)
+  }, [setTimelineHeightPx, timelineHeightPx])
+
+  const heightMax = getTimelineHeightMax()
+
   return (
-    <section className="flex h-[260px] w-full min-w-0 shrink-0 select-none flex-col border-t border-fb-border bg-fb-surface">
-      <div className="flex h-10 items-center gap-2 border-b border-fb-border bg-fb-panel px-3">
+    <section
+      className="relative flex w-full min-w-0 shrink-0 select-none flex-col overflow-hidden border-t border-fb-border bg-fb-surface"
+      style={{ height: clampTimelineHeight(timelineHeightPx) }}
+    >
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize timeline"
+        aria-valuemin={TIMELINE_MIN_HEIGHT}
+        aria-valuemax={heightMax}
+        aria-valuenow={clampTimelineHeight(timelineHeightPx)}
+        tabIndex={0}
+        onPointerDown={onResizePointerDown}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowUp') {
+            event.preventDefault()
+            setTimelineHeightPx(clampTimelineHeight(timelineHeightPx + 24))
+          }
+          if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            setTimelineHeightPx(clampTimelineHeight(timelineHeightPx - 24))
+          }
+        }}
+        className="group absolute inset-x-0 top-0 z-20 flex h-2 cursor-row-resize items-start justify-center"
+      >
+        <span className="mt-0.5 h-1 w-10 rounded-full bg-fb-border-strong opacity-70 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+      </div>
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-fb-border bg-fb-panel px-3 pt-1">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
           Timeline
         </h2>
-        <div className="ml-auto flex items-center gap-1">
-          <button
-            type="button"
-            aria-label="Zoom out"
-            onClick={() => setPixelsPerSecond(pixelsPerSecond - 20)}
-            className="inline-flex h-6 w-6 items-center justify-center rounded text-white/70 hover:bg-white/[0.08]"
-          >
-            <ZoomOut size={14} strokeWidth={1.75} />
-          </button>
-          <span className="w-12 text-center font-mono text-[10px] text-fb-muted">
-            {pixelsPerSecond}px/s
-          </span>
-          <button
-            type="button"
-            aria-label="Zoom in"
-            onClick={() => setPixelsPerSecond(pixelsPerSecond + 20)}
-            className="inline-flex h-6 w-6 items-center justify-center rounded text-white/70 hover:bg-white/[0.08]"
-          >
-            <ZoomIn size={14} strokeWidth={1.75} />
-          </button>
+        <div className="ml-auto flex items-center gap-2">
+          <ZoomOut
+            size={12}
+            strokeWidth={1.75}
+            className="shrink-0 text-fb-muted"
+            aria-hidden
+          />
+          <input
+            type="range"
+            min={20}
+            max={240}
+            step={10}
+            value={pixelsPerSecond}
+            onChange={(event) =>
+              setPixelsPerSecond(Number(event.target.value))
+            }
+            aria-label="Timeline zoom"
+            title={`${pixelsPerSecond}px/s`}
+            className="h-1.5 w-28 cursor-pointer appearance-none rounded-full bg-fb-border accent-fb-accent [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-fb-text"
+          />
+          <ZoomIn
+            size={12}
+            strokeWidth={1.75}
+            className="shrink-0 text-fb-muted"
+            aria-hidden
+          />
         </div>
-        <span className="font-mono text-[11px] tabular-nums text-fb-muted">
-          {formatTimecode(playheadMs)}
-        </span>
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1">

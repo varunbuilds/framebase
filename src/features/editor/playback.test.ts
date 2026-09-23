@@ -16,12 +16,17 @@ function track(
 }
 
 function media(
-  partial: Pick<MediaSource, 'id' | 'name' | 'kind' | 'durationMs'>,
+  partial: Pick<MediaSource, 'id' | 'name' | 'kind' | 'durationMs'> &
+    Partial<Pick<MediaSource, 'hasVideo' | 'hasAudio'>>,
 ): MediaSource {
+  const hasVideo = partial.hasVideo ?? partial.kind === 'video'
+  const hasAudio = partial.hasAudio ?? partial.kind === 'audio'
   return {
     mimeType: partial.kind === 'video' ? 'video/mp4' : 'audio/mpeg',
     availability: 'ready',
     importedAt: '2026-01-01T00:00:00.000Z',
+    hasVideo,
+    hasAudio,
     ...partial,
   }
 }

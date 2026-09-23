@@ -9,6 +9,8 @@ export interface EditorUiState {
   seekVersion: number
   pixelsPerSecond: number
   timelineScrollLeft: number
+  /** Timeline panel height in pixels (transient UI). */
+  timelineHeightPx: number
   importError: string | null
   importStatus: 'idle' | 'importing'
   playbackError: string | null

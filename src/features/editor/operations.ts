@@ -62,6 +62,8 @@ export function removeMediaSource(
 export function addClipFromMedia(args: {
   document: ProjectDocument
   mediaSourceId: string
+  /** Which stream to place. Defaults to the source primary kind. */
+  role?: Track['kind']
   trackId?: string
   timelineStartMs?: TimeMs
 }): OperationResult {
@@ -71,21 +73,32 @@ export function addClipFromMedia(args: {
     return { ok: false, error: 'Media source not found.' }
   }
 
+  const role =
+    args.role ??
+    (source.hasVideo ? 'video' : source.hasAudio ? 'audio' : source.kind)
+
+  if (role === 'video' && !source.hasVideo) {
+    return { ok: false, error: 'This media has no video stream.' }
+  }
+  if (role === 'audio' && !source.hasAudio) {
+    return { ok: false, error: 'This media has no audio stream.' }
+  }
+
   const preferredTrack =
     (args.trackId ? getTrackById(document, args.trackId) : undefined) ??
-    document.tracks.find((track) => track.kind === source.kind)
+    document.tracks.find((track) => track.kind === role)
 
   if (!preferredTrack) {
     return {
       ok: false,
-      error: `No ${source.kind} track available for this media.`,
+      error: `No ${role} track available for this media.`,
     }
   }
 
-  if (preferredTrack.kind !== source.kind) {
+  if (preferredTrack.kind !== role) {
     return {
       ok: false,
-      error: `Cannot place ${source.kind} media on a ${preferredTrack.kind} track.`,
+      error: `Cannot place ${role} on a ${preferredTrack.kind} track.`,
     }
   }
 
@@ -111,6 +124,51 @@ export function addClipFromMedia(args: {
       ...document,
       clips: [...document.clips, clip],
     }),
+  }
+}
+
+/**
+ * Place a library item on the timeline. AV files create both a video-row clip
+ * and an audio-row clip that share the same mediaSourceId.
+ */
+export function addMediaToTimeline(args: {
+  document: ProjectDocument
+  mediaSourceId: string
+  timelineStartMs?: TimeMs
+}): OperationResult & { clipIds?: string[] } {
+  const source = getMediaSourceById(args.document, args.mediaSourceId)
+  if (!source) {
+    return { ok: false, error: 'Media source not found.' }
+  }
+
+  const timelineStartMs = args.timelineStartMs
+  const roles: Track['kind'][] = []
+  if (source.hasVideo) roles.push('video')
+  if (source.hasAudio) roles.push('audio')
+  if (roles.length === 0) {
+    return { ok: false, error: 'Media has no playable streams.' }
+  }
+
+  let document = args.document
+  const clipIds: string[] = []
+
+  for (const role of roles) {
+    const result = addClipFromMedia({
+      document,
+      mediaSourceId: args.mediaSourceId,
+      role,
+      timelineStartMs,
+    })
+    if (!result.ok) return result
+    document = result.document
+    if (result.clipId) clipIds.push(result.clipId)
+  }
+
+  return {
+    ok: true,
+    document,
+    clipId: clipIds[0],
+    clipIds,
   }
 }
 
@@ -153,11 +211,24 @@ export function moveClip(args: {
     return { ok: false, error: 'Media source missing for clip.' }
   }
 
-  if (track.kind !== source.kind) {
+  const currentTrack = getTrackById(args.document, clip.trackId)
+  const placementKind = currentTrack?.kind
+  if (!placementKind) {
+    return { ok: false, error: 'Clip track not found.' }
+  }
+
+  if (track.kind !== placementKind) {
     return {
       ok: false,
-      error: `Cannot move ${source.kind} clip onto a ${track.kind} track.`,
+      error: `Cannot move a ${placementKind} clip onto a ${track.kind} track.`,
     }
+  }
+
+  if (placementKind === 'video' && !source.hasVideo) {
+    return { ok: false, error: 'This media has no video stream.' }
+  }
+  if (placementKind === 'audio' && !source.hasAudio) {
+    return { ok: false, error: 'This media has no audio stream.' }
   }
 
   if (track.locked) {

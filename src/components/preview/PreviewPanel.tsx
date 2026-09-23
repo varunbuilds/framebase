@@ -58,8 +58,8 @@ export function PreviewPanel() {
   })()
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-fb-panel">
-      <div className="flex h-11 items-center justify-between gap-2 px-4">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-fb-panel">
+      <div className="flex h-11 shrink-0 items-center justify-between gap-2 px-4">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
           Preview
         </h2>
@@ -71,38 +71,46 @@ export function PreviewPanel() {
         )}
       </div>
 
-      <div className="flex min-h-0 flex-1 items-center justify-center p-7">
-        <div className="relative flex max-h-full w-full max-w-[760px] items-center justify-center">
-          <div className="relative aspect-video w-full max-h-[min(460px,100%)] overflow-hidden rounded-lg border border-fb-border-strong bg-[#181e22] shadow-[0_18px_70px_rgba(0,0,0,0.32)]">
-            <video
-              ref={mediaRef}
-              className={`h-full w-full object-contain ${showMedia ? 'opacity-100' : 'opacity-0'}`}
-              playsInline
-              preload="auto"
-              aria-label="Timeline preview"
-            />
+      <div
+        className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 sm:p-6"
+        style={{ containerType: 'size' }}
+      >
+        <div
+          className="relative overflow-hidden border border-fb-border-strong bg-[#181e22] shadow-[inset_0_1px_0_rgba(255,255,255,0.06),inset_0_0_48px_rgba(0,0,0,0.55)]"
+          style={{
+            aspectRatio: '16 / 9',
+            width: 'min(100%, 760px, calc(min(460px, 100cqh) * 16 / 9))',
+            maxHeight: 'min(460px, 100%)',
+          }}
+        >
+          <video
+            ref={mediaRef}
+            className={`h-full w-full object-contain ${showMedia ? 'opacity-100' : 'opacity-0'}`}
+            playsInline
+            preload="auto"
+            aria-label="Timeline preview"
+          />
 
-            {isGap && (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#181e22]">
-                <div className="flex flex-col items-center gap-4 text-center">
-                  <span className="grid h-14 w-20 place-items-center before:absolute before:h-4 before:w-4 before:border-t before:border-l before:border-white/35 after:absolute after:h-4 after:w-4 after:border-r after:border-b after:border-white/35">
-                    <span className="text-xl font-light text-white/60">+</span>
-                  </span>
-                  <span className="text-[13px] text-white/45">
+          {isGap && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#181e22]">
+              <div className="flex flex-col items-center gap-4 text-center">
+                <span className="grid h-14 w-20 place-items-center before:absolute before:h-4 before:w-4 before:border-t before:border-l before:border-white/35 after:absolute after:h-4 after:w-4 after:border-r after:border-b after:border-white/35">
+                  <span className="text-xl font-light text-white/60">+</span>
+                </span>
+                <span className="text-[13px] text-white/45">
                   {timelineDurationMs <= 0
                     ? 'Add clips to the active video track'
                     : resolution.status === 'ended'
                       ? 'End of timeline'
                       : 'Gap'}
-                  </span>
-                </div>
+                </span>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="relative flex h-12 items-center justify-center border-t border-fb-border bg-fb-surface px-4">
+      <div className="relative flex h-12 shrink-0 items-center justify-center border-t border-fb-border bg-fb-surface px-4">
         <div className="absolute left-4 font-mono text-[12px] tabular-nums text-fb-text">
           {formatTimecode(playheadMs)}
           <span className="text-fb-subtle"> / </span>

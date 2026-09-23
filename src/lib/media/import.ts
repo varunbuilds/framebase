@@ -5,7 +5,7 @@ import { secondsToMs } from '@/utils/time'
 import { setObjectUrl } from './object-urls'
 
 export type ImportMediaResult =
-  | { ok: true; source: MediaSource; linkedAudioSource?: MediaSource; objectUrl: string }
+  | { ok: true; source: MediaSource; objectUrl: string }
   | { ok: false; error: string }
 
 function inferKindFromMime(mimeType: string, fileName: string): MediaKind | null {
@@ -48,11 +48,12 @@ async function readDurationWithVideoElement(file: File): Promise<number | null> 
 async function probeWithMediabunny(file: File): Promise<{
   durationMs: number
   kind: MediaKind
+  hasVideo: boolean
+  hasAudio: boolean
   width?: number
   height?: number
   sampleRate?: number
   channelCount?: number
-  hasAudio: boolean
   mimeType: string
 }> {
   const input = new Input({
@@ -78,13 +79,22 @@ async function probeWithMediabunny(file: File): Promise<{
     if (videoTrack) {
       const width = await videoTrack.getDisplayWidth()
       const height = await videoTrack.getDisplayHeight()
+      let sampleRate: number | undefined
+      let channelCount: number | undefined
+      if (audioTrack) {
+        sampleRate = await audioTrack.getSampleRate()
+        channelCount = await audioTrack.getNumberOfChannels()
+      }
       return {
         durationMs: secondsToMs(durationSeconds),
         kind: 'video',
+        hasVideo: true,
+        hasAudio: Boolean(audioTrack),
         width,
         height,
+        sampleRate,
+        channelCount,
         mimeType: file.type || 'video/*',
-        hasAudio: Boolean(audioTrack),
       }
     }
 
@@ -94,16 +104,16 @@ async function probeWithMediabunny(file: File): Promise<{
       return {
         durationMs: secondsToMs(durationSeconds),
         kind: 'audio',
+        hasVideo: false,
+        hasAudio: true,
         sampleRate,
         channelCount,
         mimeType: file.type || 'audio/*',
-        hasAudio: false,
       }
     }
 
     throw new Error('No playable video or audio track found in this file.')
   } finally {
-    // Input holds references; dispose if available in this version
     if (typeof (input as { dispose?: () => void }).dispose === 'function') {
       ;(input as { dispose: () => void }).dispose()
     }
@@ -124,14 +134,13 @@ export async function importLocalMediaFile(file: File): Promise<ImportMediaResul
     const id = createId('media')
     const objectUrl = URL.createObjectURL(file)
     setObjectUrl(id, objectUrl)
-    const linkedAudioId = probed.kind === 'video' && probed.hasAudio
-      ? createId('media')
-      : undefined
 
     const source: MediaSource = {
       id,
       name: file.name,
       kind: probed.kind,
+      hasVideo: probed.hasVideo,
+      hasAudio: probed.hasAudio,
       durationMs: probed.durationMs,
       mimeType: probed.mimeType || file.type || 'application/octet-stream',
       width: probed.width,
@@ -140,25 +149,9 @@ export async function importLocalMediaFile(file: File): Promise<ImportMediaResul
       channelCount: probed.channelCount,
       availability: 'ready',
       importedAt: new Date().toISOString(),
-      linkedMediaSourceId: linkedAudioId,
-    }
-    const linkedAudioSource = linkedAudioId
-      ? {
-          id: linkedAudioId,
-          name: file.name,
-          kind: 'audio' as const,
-          durationMs: probed.durationMs,
-          mimeType: probed.mimeType,
-          availability: 'ready' as const,
-          importedAt: source.importedAt,
-          linkedMediaSourceId: id,
-        }
-      : undefined
-    if (linkedAudioSource) {
-      setObjectUrl(linkedAudioSource.id, URL.createObjectURL(file))
     }
 
-    return { ok: true, source, linkedAudioSource, objectUrl }
+    return { ok: true, source, objectUrl }
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'Failed to import media file.'
