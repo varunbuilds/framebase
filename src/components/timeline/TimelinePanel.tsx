@@ -1,4 +1,4 @@
-import { ZoomIn, ZoomOut } from 'lucide-react'
+import { Film, Music2, ZoomIn, ZoomOut } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   getMediaSourceById,
@@ -6,10 +6,11 @@ import {
   getTimelineDurationMs,
 } from '@/features/editor/project'
 import { useEditorStore } from '@/stores/editor-store'
+import { getObjectUrl } from '@/lib/media/object-urls'
 import type { Clip, Track } from '@/types/timeline'
 import { clamp, formatTimecode } from '@/utils/time'
 
-const TRACK_HEIGHT = 44
+const TRACK_HEIGHT = 72
 const RULER_HEIGHT = 28
 const LABEL_WIDTH = 88
 
@@ -19,6 +20,68 @@ function msToPx(ms: number, pixelsPerSecond: number): number {
 
 function pxToMs(px: number, pixelsPerSecond: number): number {
   return Math.round((px / pixelsPerSecond) * 1000)
+}
+
+function VideoFilmstrip({ src, durationMs }: { src: string; durationMs: number }) {
+  const [frames, setFrames] = useState<string[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    const video = document.createElement('video')
+    video.src = src
+    video.muted = true
+    video.preload = 'auto'
+
+    const captureFrames = async () => {
+      const duration = Number.isFinite(video.duration)
+        ? Math.min(video.duration, durationMs / 1000)
+        : durationMs / 1000
+      const count = Math.max(3, Math.min(8, Math.ceil(duration / 2)))
+      const nextFrames: string[] = []
+      const canvas = document.createElement('canvas')
+      canvas.width = 160
+      canvas.height = 90
+      const context = canvas.getContext('2d')
+      if (!context) return
+      for (let index = 0; index < count; index += 1) {
+        await new Promise<void>((resolve) => {
+          video.onseeked = () => resolve()
+          video.onerror = () => resolve()
+          video.currentTime = Math.min(
+            Math.max(0, duration - 0.05),
+            (duration * (index + 0.5)) / count,
+          )
+        })
+        if (cancelled) return
+        context.drawImage(video, 0, 0, canvas.width, canvas.height)
+        nextFrames.push(canvas.toDataURL('image/jpeg', 0.72))
+      }
+      if (!cancelled) setFrames(nextFrames)
+    }
+    video.onloadedmetadata = () => void captureFrames()
+    video.onerror = () => {
+      if (!cancelled) setFrames([])
+    }
+    return () => {
+      cancelled = true
+      video.removeAttribute('src')
+      video.load()
+    }
+  }, [durationMs, src])
+
+  if (frames.length === 0) return null
+  return (
+    <div className="pointer-events-none absolute inset-0 flex overflow-hidden opacity-70" aria-hidden>
+      {frames.map((frame, index) => (
+        <img
+          key={`${index}-${frame.slice(-12)}`}
+          src={frame}
+          className="h-full min-w-0 flex-1 object-cover"
+          alt=""
+        />
+      ))}
+    </div>
+  )
 }
 
 function TimelineClipBlock({
@@ -74,6 +137,7 @@ function TimelineClipBlock({
   const left = msToPx(timelineStartMs, pixelsPerSecond)
   const width = Math.max(8, msToPx(durationMs, pixelsPerSecond))
   const isVideo = track.kind === 'video'
+  const objectUrl = media ? getObjectUrl(media.id) : undefined
 
   return (
     <div
@@ -106,6 +170,18 @@ function TimelineClipBlock({
       } ${selected ? 'ring-1 ring-fb-accent ring-offset-1 ring-offset-fb-surface' : ''}`}
       style={{ left, width }}
     >
+      {isVideo && objectUrl ? (
+        <VideoFilmstrip src={objectUrl} durationMs={durationMs} />
+      ) : (
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          style={{
+            backgroundImage:
+              'repeating-linear-gradient(90deg, transparent 0 7px, rgba(116, 225, 183, .38) 8px 10px, transparent 11px 18px)',
+          }}
+          aria-hidden
+        />
+      )}
       <button
         type="button"
         data-trim="in"
@@ -117,7 +193,7 @@ function TimelineClipBlock({
           onPointerDownTrim('trim-in', event.clientX)
         }}
       />
-      <div className="min-w-0 flex-1 px-1.5 py-1">
+      <div className="relative z-10 min-w-0 flex-1 px-2 py-2">
         <div className="truncate text-[10px] font-medium text-fb-text">
           {clip.label ?? media?.name ?? 'Clip'}
         </div>
@@ -166,10 +242,15 @@ export function TimelinePanel() {
   const isScrubbingRef = useRef(false)
   const restoredScrollRef = useRef(false)
   const [dragDeltaMs, setDragDeltaMs] = useState(0)
+  const [viewportWidth, setViewportWidth] = useState(0)
 
   const tracks = getSortedTracks(document)
   const durationMs = getTimelineDurationMs(document)
-  const contentWidth = Math.max(800, msToPx(durationMs, pixelsPerSecond) + 120)
+  const contentWidth = Math.max(
+    800,
+    viewportWidth,
+    msToPx(durationMs, pixelsPerSecond) + 120,
+  )
 
   const seekFromClientX = useCallback(
     (clientX: number) => {
@@ -218,11 +299,13 @@ export function TimelinePanel() {
           : pixelsPerSecond >= 40
             ? 2000
             : 5000
-    for (let ms = 0; ms <= durationMs + stepMs; ms += stepMs) {
+    const visibleDurationMs = pxToMs(viewportWidth, pixelsPerSecond)
+    const rulerEndMs = Math.max(durationMs + stepMs, visibleDurationMs + stepMs)
+    for (let ms = 0; ms <= rulerEndMs; ms += stepMs) {
       marks.push({ ms, major: ms % (stepMs * 2) === 0 || stepMs >= 2000 })
     }
     return marks
-  }, [durationMs, pixelsPerSecond])
+  }, [durationMs, pixelsPerSecond, viewportWidth])
 
   const commitDrag = useCallback(() => {
     const drag = useEditorStore.getState().clipDrag
@@ -321,6 +404,17 @@ export function TimelinePanel() {
   }, [timelineScrollLeft])
 
   useEffect(() => {
+    const viewport = scrollRef.current
+    if (!viewport) return
+    const resizeObserver = new ResizeObserver(() => {
+      setViewportWidth(viewport.clientWidth)
+    })
+    resizeObserver.observe(viewport)
+    setViewportWidth(viewport.clientWidth)
+    return () => resizeObserver.disconnect()
+  }, [])
+
+  useEffect(() => {
     if (!isPlaying) return
     const viewport = scrollRef.current
     if (!viewport) return
@@ -404,9 +498,14 @@ export function TimelinePanel() {
           {tracks.map((track) => (
             <div
               key={track.id}
-              className="flex items-center border-b border-fb-border px-2 text-[11px] font-medium text-fb-muted"
+              className="flex items-center gap-2 border-b border-fb-border px-2 text-[11px] font-medium text-fb-muted"
               style={{ height: TRACK_HEIGHT }}
             >
+              {track.kind === 'video' ? (
+                <Film size={14} strokeWidth={1.6} />
+              ) : (
+                <Music2 size={14} strokeWidth={1.6} />
+              )}
               {track.name}
             </div>
           ))}
@@ -418,6 +517,7 @@ export function TimelinePanel() {
           onClick={() => selectClip(null)}
           onScroll={(event) => setTimelineScrollLeft(event.currentTarget.scrollLeft)}
           onWheel={(event) => {
+            if (!(event.ctrlKey || event.metaKey)) return
             event.preventDefault()
             zoomAtClientX(event.clientX, event.deltaY < 0 ? 1 : -1)
           }}
@@ -458,7 +558,7 @@ export function TimelinePanel() {
             {tracks.map((track) => (
               <div
                 key={track.id}
-                className="relative border-b border-fb-border bg-fb-surface"
+              className="relative border-b border-fb-border bg-fb-surface"
                 style={{ height: TRACK_HEIGHT }}
                 onPointerDown={(event) => {
                   if (event.target !== event.currentTarget) return

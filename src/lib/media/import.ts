@@ -5,7 +5,7 @@ import { secondsToMs } from '@/utils/time'
 import { setObjectUrl } from './object-urls'
 
 export type ImportMediaResult =
-  | { ok: true; source: MediaSource; objectUrl: string }
+  | { ok: true; source: MediaSource; linkedAudioSource?: MediaSource; objectUrl: string }
   | { ok: false; error: string }
 
 function inferKindFromMime(mimeType: string, fileName: string): MediaKind | null {
@@ -52,6 +52,7 @@ async function probeWithMediabunny(file: File): Promise<{
   height?: number
   sampleRate?: number
   channelCount?: number
+  hasAudio: boolean
   mimeType: string
 }> {
   const input = new Input({
@@ -83,6 +84,7 @@ async function probeWithMediabunny(file: File): Promise<{
         width,
         height,
         mimeType: file.type || 'video/*',
+        hasAudio: Boolean(audioTrack),
       }
     }
 
@@ -95,6 +97,7 @@ async function probeWithMediabunny(file: File): Promise<{
         sampleRate,
         channelCount,
         mimeType: file.type || 'audio/*',
+        hasAudio: false,
       }
     }
 
@@ -121,6 +124,9 @@ export async function importLocalMediaFile(file: File): Promise<ImportMediaResul
     const id = createId('media')
     const objectUrl = URL.createObjectURL(file)
     setObjectUrl(id, objectUrl)
+    const linkedAudioId = probed.kind === 'video' && probed.hasAudio
+      ? createId('media')
+      : undefined
 
     const source: MediaSource = {
       id,
@@ -134,9 +140,25 @@ export async function importLocalMediaFile(file: File): Promise<ImportMediaResul
       channelCount: probed.channelCount,
       availability: 'ready',
       importedAt: new Date().toISOString(),
+      linkedMediaSourceId: linkedAudioId,
+    }
+    const linkedAudioSource = linkedAudioId
+      ? {
+          id: linkedAudioId,
+          name: file.name,
+          kind: 'audio' as const,
+          durationMs: probed.durationMs,
+          mimeType: probed.mimeType,
+          availability: 'ready' as const,
+          importedAt: source.importedAt,
+          linkedMediaSourceId: id,
+        }
+      : undefined
+    if (linkedAudioSource) {
+      setObjectUrl(linkedAudioSource.id, URL.createObjectURL(file))
     }
 
-    return { ok: true, source, objectUrl }
+    return { ok: true, source, linkedAudioSource, objectUrl }
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'Failed to import media file.'

@@ -173,6 +173,29 @@ export function moveClip(args: {
   return { ok: true, document: replaceClip(args.document, nextClip) }
 }
 
+export function createTrack(args: {
+  document: ProjectDocument
+  kind: Track['kind']
+  order: number
+  name: string
+}): OperationResult {
+  const track: Track = {
+    id: createId('track'),
+    kind: args.kind,
+    order: args.order,
+    name: args.name,
+    muted: false,
+    locked: false,
+  }
+  return {
+    ok: true,
+    document: touchDocument({
+      ...args.document,
+      tracks: [...args.document.tracks, track],
+    }),
+  }
+}
+
 export function trimClip(args: {
   document: ProjectDocument
   clipId: string

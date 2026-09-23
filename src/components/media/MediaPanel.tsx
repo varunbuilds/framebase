@@ -33,6 +33,7 @@ export function MediaPanel() {
         continue
       }
       registerMediaSource(result.source)
+      if (result.linkedAudioSource) registerMediaSource(result.linkedAudioSource)
     }
 
     setImportStatus('idle')

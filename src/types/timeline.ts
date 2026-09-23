@@ -18,6 +18,8 @@ export interface MediaSource {
   height?: number
   sampleRate?: number
   channelCount?: number
+  /** Paired audio/video source from the same imported file, when available. */
+  linkedMediaSourceId?: string
   availability: MediaAvailability
   importedAt: string
 }
