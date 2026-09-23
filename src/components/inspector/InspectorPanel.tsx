@@ -56,7 +56,9 @@ function NumberField({
 
 export function InspectorPanel() {
   const document = useEditorStore((state) => state.document)
-  const selectedClipId = useEditorStore((state) => state.ui.selectedClipId)
+  const selectedClipId = useEditorStore(
+    (state) => state.ui.selectedClipIds[state.ui.selectedClipIds.length - 1] ?? null,
+  )
   const trimClipTo = useEditorStore((state) => state.trimClipTo)
   const moveClipTo = useEditorStore((state) => state.moveClipTo)
   const updateSelectedClipLabel = useEditorStore(

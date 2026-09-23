@@ -228,50 +228,128 @@ export function unlinkClip(
   }
 }
 
-/**
- * Link a clip to its natural AV counterpart (same media source, other track kind)
- * or to another unlinked clip already sharing the same media source.
- */
-export function linkClip(
+/** Unlink every multi-member group touched by the given clip ids. */
+export function unlinkClips(
   document: ProjectDocument,
-  clipId: string,
+  clipIds: string[],
 ): OperationResult {
-  const clip = getClipById(document, clipId)
-  if (!clip) return { ok: false, error: 'Clip not found.' }
+  const seenGroups = new Set<string>()
+  let next = document
 
-  if (clip.linkGroupId) {
-    const group = getLinkedClips(document, clipId)
-    if (group.length > 1) {
-      return { ok: false, error: 'Clip is already linked.' }
+  for (const clipId of clipIds) {
+    const clip = getClipById(next, clipId)
+    if (!clip?.linkGroupId) continue
+    if (seenGroups.has(clip.linkGroupId)) continue
+    seenGroups.add(clip.linkGroupId)
+    const result = unlinkClip(next, clipId)
+    if (!result.ok) return result
+    next = result.document
+  }
+
+  return { ok: true, document: next }
+}
+
+/**
+ * Link the selected clips together. Any video clip may link with any audio
+ * clip — they do not need to share a media source.
+ */
+export function linkClips(
+  document: ProjectDocument,
+  clipIds: string[],
+): OperationResult {
+  const uniqueIds = [...new Set(clipIds)]
+  const clips = uniqueIds
+    .map((id) => getClipById(document, id))
+    .filter((clip): clip is Clip => clip != null)
+
+  if (clips.length < 2) {
+    return {
+      ok: false,
+      error: 'Select at least one video clip and one audio clip to link.',
     }
   }
 
-  const clipTrack = getTrackById(document, clip.trackId)
-  if (!clipTrack) return { ok: false, error: 'Clip track not found.' }
+  const kinds = new Set<Track['kind']>()
+  for (const clip of clips) {
+    const track = getTrackById(document, clip.trackId)
+    if (!track) return { ok: false, error: 'Clip track not found.' }
+    kinds.add(track.kind)
+  }
 
-  const partner = document.clips.find((candidate) => {
-    if (candidate.id === clip.id) return false
-    if (candidate.mediaSourceId !== clip.mediaSourceId) return false
-    if (candidate.linkGroupId) return false
-    const track = getTrackById(document, candidate.trackId)
-    return track != null && track.kind !== clipTrack.kind
-  })
-
-  if (!partner) {
+  if (!kinds.has('video') || !kinds.has('audio')) {
     return {
       ok: false,
-      error: 'No unlinked audio/video pair found for this clip.',
+      error: 'Link requires at least one video clip and one audio clip.',
+    }
+  }
+
+  const selectedIds = new Set(clips.map((clip) => clip.id))
+  for (const clip of clips) {
+    if (!clip.linkGroupId) continue
+    const group = getLinkedClips(document, clip.id)
+    if (group.some((member) => !selectedIds.has(member.id))) {
+      return {
+        ok: false,
+        error: 'Unlink existing partners before linking a new selection.',
+      }
     }
   }
 
   const linkGroupId = createId('link')
   return {
     ok: true,
-    document: replaceClips(document, [
-      { ...clip, linkGroupId },
-      { ...partner, linkGroupId },
-    ]),
+    document: replaceClips(
+      document,
+      clips.map((clip) => ({ ...clip, linkGroupId })),
+    ),
   }
+}
+
+/** True when the selection can form a new video+audio link group. */
+export function canLinkClipSelection(
+  document: ProjectDocument,
+  clipIds: string[],
+): boolean {
+  const uniqueIds = [...new Set(clipIds)]
+  const clips = uniqueIds
+    .map((id) => getClipById(document, id))
+    .filter((clip): clip is Clip => clip != null)
+  if (clips.length < 2) return false
+
+  const kinds = new Set<Track['kind']>()
+  for (const clip of clips) {
+    const track = getTrackById(document, clip.trackId)
+    if (!track) return false
+    kinds.add(track.kind)
+  }
+  if (!kinds.has('video') || !kinds.has('audio')) return false
+
+  const selectedIds = new Set(clips.map((clip) => clip.id))
+  for (const clip of clips) {
+    if (!clip.linkGroupId) continue
+    const group = getLinkedClips(document, clip.id)
+    if (group.some((member) => !selectedIds.has(member.id))) {
+      return false
+    }
+    // Already fully linked to each other — prefer unlink, not link.
+    if (
+      group.length > 1 &&
+      group.every((member) => selectedIds.has(member.id)) &&
+      group.length === clips.length
+    ) {
+      return false
+    }
+  }
+
+  return true
+}
+
+/** True when any selected clip belongs to a multi-member link group. */
+export function canUnlinkClipSelection(
+  document: ProjectDocument,
+  clipIds: string[],
+): boolean {
+  return clipIds.some((clipId) => getLinkedClips(document, clipId).length > 1)
 }
 
 export function deleteClip(

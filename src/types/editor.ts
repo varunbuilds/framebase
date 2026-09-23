@@ -1,7 +1,7 @@
 import type { Clip, ProjectDocument, TimeMs } from './timeline'
 
 export interface EditorUiState {
-  selectedClipId: string | null
+  selectedClipIds: string[]
   selectedMediaSourceId: string | null
   playheadMs: TimeMs
   isPlaying: boolean

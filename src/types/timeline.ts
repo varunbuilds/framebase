@@ -37,13 +37,10 @@ export interface Track {
 }
 
 /**
- * A timeline instance of a media source.
- * `sourceInMs` / `sourceOutMs` are relative to the source.
- * `timelineStartMs` is the placement on the sequence.
- *
  * An AV file is one MediaSource in the library; placing it may create both a
- * video-track clip and an audio-track clip that share the same mediaSourceId
- * and `linkGroupId` so they move together until unlinked.
+ * video-track clip and an audio-track clip that share a linkGroupId so they
+ * move together until unlinked. Users can also link any video clip to any
+ * audio clip via selection.
  */
 export interface Clip {
   id: string
@@ -52,7 +49,7 @@ export interface Clip {
   timelineStartMs: TimeMs
   sourceInMs: TimeMs
   sourceOutMs: TimeMs
-  /** Shared id for linked clip groups (e.g. video+audio from one file). */
+  /** Shared id for linked clip groups (move/trim together until unlinked). */
   linkGroupId?: string
   label?: string
 }

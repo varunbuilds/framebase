@@ -9,11 +9,12 @@ import {
 } from 'react'
 import { AudioWaveform } from '@/components/timeline/AudioWaveform'
 import {
+  canLinkClipSelection,
+  canUnlinkClipSelection,
   planClipMove,
   type ClipMovePlan,
 } from '@/features/editor/operations'
 import {
-  getLinkedClips,
   getMediaSourceById,
   getSortedTracks,
   getTimelineDurationMs,
@@ -174,7 +175,7 @@ function TimelineClipBlock({
   dragDeltaMs: number
   /** When set (live move plan), overrides timeline start instead of delta. */
   previewTimelineStartMs?: number
-  onSelect: () => void
+  onSelect: (additive: boolean) => void
   onPointerDownMove: (clientX: number, clientY: number) => void
   onPointerDownTrim: (edge: 'trim-in' | 'trim-out', clientX: number) => void
 }) {
@@ -230,12 +231,12 @@ function TimelineClipBlock({
       aria-pressed={selected}
       onClick={(event) => {
         event.stopPropagation()
-        onSelect()
+        onSelect(event.metaKey || event.ctrlKey)
       }}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
-          onSelect()
+          onSelect(event.metaKey || event.ctrlKey)
         }
       }}
       onPointerDown={(event) => {
@@ -243,7 +244,7 @@ function TimelineClipBlock({
         const target = event.target as HTMLElement
         if (target.closest('[data-trim]')) return
         event.stopPropagation()
-        onSelect()
+        onSelect(event.metaKey || event.ctrlKey)
         onPointerDownMove(event.clientX, event.clientY)
       }}
       className={`absolute top-1.5 z-0 flex h-[calc(100%-12px)] cursor-grab flex-col overflow-hidden rounded-md border active:cursor-grabbing ${
@@ -293,7 +294,7 @@ function TimelineClipBlock({
         className="absolute inset-y-0 left-0 z-[1] w-1.5 cursor-ew-resize bg-transparent hover:bg-white/25"
         onPointerDown={(event) => {
           event.stopPropagation()
-          onSelect()
+          onSelect(event.metaKey || event.ctrlKey)
           onPointerDownTrim('trim-in', event.clientX)
         }}
       />
@@ -304,7 +305,7 @@ function TimelineClipBlock({
         className="absolute inset-y-0 right-0 z-[1] w-1.5 cursor-ew-resize bg-transparent hover:bg-white/25"
         onPointerDown={(event) => {
           event.stopPropagation()
-          onSelect()
+          onSelect(event.metaKey || event.ctrlKey)
           onPointerDownTrim('trim-out', event.clientX)
         }}
       />
@@ -321,7 +322,7 @@ export function TimelinePanel() {
     (state) => state.ui.timelineScrollLeft,
   )
   const timelineHeightPx = useEditorStore((state) => state.ui.timelineHeightPx)
-  const selectedClipId = useEditorStore((state) => state.ui.selectedClipId)
+  const selectedClipIds = useEditorStore((state) => state.ui.selectedClipIds)
   const clipDrag = useEditorStore((state) => state.clipDrag)
   const seekTo = useEditorStore((state) => state.seekTo)
   const setPixelsPerSecond = useEditorStore((state) => state.setPixelsPerSecond)
@@ -336,8 +337,10 @@ export function TimelinePanel() {
   const moveClipTo = useEditorStore((state) => state.moveClipTo)
   const trimClipTo = useEditorStore((state) => state.trimClipTo)
   const removeClip = useEditorStore((state) => state.removeClip)
-  const linkSelectedClip = useEditorStore((state) => state.linkSelectedClip)
-  const unlinkSelectedClip = useEditorStore((state) => state.unlinkSelectedClip)
+  const linkSelectedClips = useEditorStore((state) => state.linkSelectedClips)
+  const unlinkSelectedClips = useEditorStore(
+    (state) => state.unlinkSelectedClips,
+  )
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const tracksContentRef = useRef<HTMLDivElement>(null)
@@ -353,33 +356,17 @@ export function TimelinePanel() {
 
   const tracks = getSortedTracks(document)
   const durationMs = getTimelineDurationMs(document)
-  const selectedClip = selectedClipId
-    ? document.clips.find((clip) => clip.id === selectedClipId)
-    : undefined
-  const selectedLinkGroupId = selectedClip?.linkGroupId
-  const selectedIsLinked = Boolean(
-    selectedClipId && getLinkedClips(document, selectedClipId).length > 1,
+  const selectedClips = selectedClipIds
+    .map((id) => document.clips.find((clip) => clip.id === id))
+    .filter((clip): clip is Clip => clip != null)
+  const selectedLinkGroupIds = new Set(
+    selectedClips
+      .map((clip) => clip.linkGroupId)
+      .filter((id): id is string => Boolean(id)),
   )
-  const canLinkSelected = Boolean(
-    selectedClip &&
-      !selectedIsLinked &&
-      document.clips.some((candidate) => {
-        if (candidate.id === selectedClip.id) return false
-        if (candidate.mediaSourceId !== selectedClip.mediaSourceId) return false
-        if (candidate.linkGroupId) return false
-        const selectedTrack = document.tracks.find(
-          (track) => track.id === selectedClip.trackId,
-        )
-        const candidateTrack = document.tracks.find(
-          (track) => track.id === candidate.trackId,
-        )
-        return (
-          selectedTrack != null &&
-          candidateTrack != null &&
-          selectedTrack.kind !== candidateTrack.kind
-        )
-      }),
-  )
+  const canUnlinkSelected = canUnlinkClipSelection(document, selectedClipIds)
+  const canLinkSelected = canLinkClipSelection(document, selectedClipIds)
+  const showLinkControls = selectedClipIds.length > 0
   const contentWidth = Math.max(
     800,
     viewportWidth,
@@ -670,14 +657,16 @@ export function TimelinePanel() {
       ) {
         return
       }
-      if (selectedClipId) {
+      if (selectedClipIds.length > 0) {
         event.preventDefault()
-        removeClip(selectedClipId)
+        for (const clipId of selectedClipIds) {
+          removeClip(clipId)
+        }
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [removeClip, selectedClipId])
+  }, [removeClip, selectedClipIds])
 
   const playheadLeft = msToPx(playheadMs, pixelsPerSecond)
 
@@ -749,31 +738,34 @@ export function TimelinePanel() {
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
           Timeline
         </h2>
-        {selectedClipId && (
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => unlinkSelectedClip()}
-              disabled={!selectedIsLinked}
-              aria-label="Unlink clip"
-              title="Unlink"
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-fb-border px-2 text-[11px] text-fb-muted disabled:cursor-not-allowed disabled:opacity-35 hover:enabled:bg-white/[0.06] hover:enabled:text-fb-text"
-            >
-              <Link2Off size={12} strokeWidth={1.75} />
-              Unlink
-            </button>
-            <button
-              type="button"
-              onClick={() => linkSelectedClip()}
-              disabled={!canLinkSelected}
-              aria-label="Link clip"
-              title="Link"
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-fb-border px-2 text-[11px] text-fb-muted disabled:cursor-not-allowed disabled:opacity-35 hover:enabled:bg-white/[0.06] hover:enabled:text-fb-text"
-            >
-              <Link2 size={12} strokeWidth={1.75} />
-              Link
-            </button>
-          </div>
+        {showLinkControls && (
+          <button
+            type="button"
+            onClick={() => {
+              if (canUnlinkSelected) unlinkSelectedClips()
+              else linkSelectedClips()
+            }}
+            disabled={!canUnlinkSelected && !canLinkSelected}
+            aria-label={canUnlinkSelected ? 'Unlink clips' : 'Link clips'}
+            title={
+              canUnlinkSelected
+                ? 'Unlink selected clips'
+                : 'Link selected video and audio clips (Cmd/Ctrl+click to multi-select)'
+            }
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-fb-border px-2 text-[11px] text-fb-muted disabled:cursor-not-allowed disabled:opacity-35 hover:enabled:bg-white/[0.06] hover:enabled:text-fb-text"
+          >
+            {canUnlinkSelected ? (
+              <>
+                <Link2Off size={12} strokeWidth={1.75} />
+                Unlink
+              </>
+            ) : (
+              <>
+                <Link2 size={12} strokeWidth={1.75} />
+                Link
+              </>
+            )}
+          </button>
         )}
         <div className="ml-auto flex items-center gap-2">
           <ZoomOut
@@ -906,11 +898,11 @@ export function TimelinePanel() {
                         clip={clip}
                         track={track}
                         pixelsPerSecond={pixelsPerSecond}
-                        selected={clip.id === selectedClipId}
+                        selected={selectedClipIds.includes(clip.id)}
                         linkedHighlight={
-                          clip.id !== selectedClipId &&
-                          Boolean(selectedLinkGroupId) &&
-                          clip.linkGroupId === selectedLinkGroupId
+                          !selectedClipIds.includes(clip.id) &&
+                          clip.linkGroupId != null &&
+                          selectedLinkGroupIds.has(clip.linkGroupId)
                         }
                         dragDeltaMs={
                           clipDrag &&
@@ -921,7 +913,9 @@ export function TimelinePanel() {
                             : 0
                         }
                         previewTimelineStartMs={placement?.timelineStartMs}
-                        onSelect={() => selectClip(clip.id)}
+                        onSelect={(additive) =>
+                          selectClip(clip.id, { additive })
+                        }
                         onPointerDownMove={(clientX, clientY) => {
                           dragDeltaMsRef.current = 0
                           dragPreferredTrackIdRef.current = track.id

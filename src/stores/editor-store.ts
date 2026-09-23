@@ -5,12 +5,12 @@ import {
   addMediaSource,
   addMediaToTimeline,
   deleteClip,
-  linkClip,
+  linkClips,
   moveClipOnTimeline,
   removeMediaSource,
   renameProject,
   trimClip,
-  unlinkClip,
+  unlinkClips,
   updateClipLabel,
 } from '@/features/editor/operations'
 import { getPlaybackEndMs } from '@/features/editor/playback'
@@ -24,7 +24,10 @@ import { clamp } from '@/utils/time'
 interface EditorActions {
   setProjectName: (name: string) => void
   markSaved: () => void
-  selectClip: (clipId: string | null) => void
+  selectClip: (
+    clipId: string | null,
+    options?: { additive?: boolean },
+  ) => void
   selectMediaSource: (mediaSourceId: string | null) => void
   setPlayheadMs: (ms: TimeMs) => void
   seekTo: (ms: TimeMs) => void
@@ -57,8 +60,8 @@ interface EditorActions {
       timelineStartMs?: TimeMs
     },
   ) => boolean
-  linkSelectedClip: () => boolean
-  unlinkSelectedClip: () => boolean
+  linkSelectedClips: () => boolean
+  unlinkSelectedClips: () => boolean
   updateSelectedClipLabel: (label: string) => boolean
 }
 
@@ -69,7 +72,7 @@ export type EditorStore = {
 } & EditorActions
 
 const initialUi: EditorUiState = {
-  selectedClipId: null,
+  selectedClipIds: [],
   selectedMediaSourceId: null,
   playheadMs: 0,
   isPlaying: false,
@@ -112,12 +115,27 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     })
   },
 
-  selectClip: (clipId) => {
+  selectClip: (clipId, options) => {
+    if (clipId == null) {
+      set({
+        ui: { ...get().ui, selectedClipIds: [] },
+      })
+      return
+    }
+
+    if (options?.additive) {
+      const current = get().ui.selectedClipIds
+      const next = current.includes(clipId)
+        ? current.filter((id) => id !== clipId)
+        : [...current, clipId]
+      set({
+        ui: { ...get().ui, selectedClipIds: next },
+      })
+      return
+    }
+
     set({
-      ui: {
-        ...get().ui,
-        selectedClipId: clipId,
-      },
+      ui: { ...get().ui, selectedClipIds: [clipId] },
     })
   },
 
@@ -308,9 +326,9 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
           ui.selectedMediaSourceId === mediaSourceId
             ? null
             : ui.selectedMediaSourceId,
-        selectedClipId: result.document.clips.some((clip) => clip.id === ui.selectedClipId)
-          ? ui.selectedClipId
-          : null,
+        selectedClipIds: ui.selectedClipIds.filter((id) =>
+          result.document.clips.some((clip) => clip.id === id),
+        ),
         saveStatus: 'unsaved',
       },
     })
@@ -332,7 +350,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
       document: result.document,
       ui: {
         ...get().ui,
-        selectedClipId: result.clipId ?? null,
+        selectedClipIds: result.clipId ? [result.clipId] : [],
         importError: null,
         saveStatus: 'unsaved',
       },
@@ -348,7 +366,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
       document: result.document,
       ui: {
         ...ui,
-        selectedClipId: ui.selectedClipId === clipId ? null : ui.selectedClipId,
+        selectedClipIds: ui.selectedClipIds.filter((id) => id !== clipId),
         isPlaying: false,
         saveStatus: 'unsaved',
       },
@@ -412,10 +430,10 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     return true
   },
 
-  linkSelectedClip: () => {
-    const clipId = get().ui.selectedClipId
-    if (!clipId) return false
-    const result = linkClip(get().document, clipId)
+  linkSelectedClips: () => {
+    const clipIds = get().ui.selectedClipIds
+    if (clipIds.length === 0) return false
+    const result = linkClips(get().document, clipIds)
     if (!result.ok) {
       get().setImportError(result.error)
       return false
@@ -427,10 +445,10 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     return true
   },
 
-  unlinkSelectedClip: () => {
-    const clipId = get().ui.selectedClipId
-    if (!clipId) return false
-    const result = unlinkClip(get().document, clipId)
+  unlinkSelectedClips: () => {
+    const clipIds = get().ui.selectedClipIds
+    if (clipIds.length === 0) return false
+    const result = unlinkClips(get().document, clipIds)
     if (!result.ok) return false
     set({
       document: result.document,
@@ -440,7 +458,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
   },
 
   updateSelectedClipLabel: (label) => {
-    const clipId = get().ui.selectedClipId
+    const clipId = get().ui.selectedClipIds[0]
     if (!clipId) return false
     const result = updateClipLabel(get().document, clipId, label)
     if (!result.ok) return false
