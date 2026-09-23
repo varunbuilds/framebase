@@ -3,8 +3,10 @@ import { createId } from '@/utils/id'
 import { clamp, clipDurationMs } from '@/utils/time'
 import {
   getClipById,
+  getLinkedClips,
   getMediaSourceById,
   getTrackById,
+  getTrackContentEndMs,
   touchDocument,
 } from './project'
 
@@ -18,6 +20,17 @@ function replaceClip(document: ProjectDocument, nextClip: Clip): ProjectDocument
     clips: document.clips.map((clip) =>
       clip.id === nextClip.id ? nextClip : clip,
     ),
+  })
+}
+
+function replaceClips(
+  document: ProjectDocument,
+  nextClips: Clip[],
+): ProjectDocument {
+  const byId = new Map(nextClips.map((clip) => [clip.id, clip]))
+  return touchDocument({
+    ...document,
+    clips: document.clips.map((clip) => byId.get(clip.id) ?? clip),
   })
 }
 
@@ -66,6 +79,7 @@ export function addClipFromMedia(args: {
   role?: Track['kind']
   trackId?: string
   timelineStartMs?: TimeMs
+  linkGroupId?: string
 }): OperationResult {
   const { document, mediaSourceId } = args
   const source = getMediaSourceById(document, mediaSourceId)
@@ -106,7 +120,11 @@ export function addClipFromMedia(args: {
     return { ok: false, error: 'Track is locked.' }
   }
 
-  const timelineStartMs = Math.max(0, Math.round(args.timelineStartMs ?? 0))
+  const timelineStartMs =
+    args.timelineStartMs != null
+      ? Math.max(0, Math.round(args.timelineStartMs))
+      : getTrackContentEndMs(document, preferredTrack.id)
+
   const clip: Clip = {
     id: createId('clip'),
     mediaSourceId: source.id,
@@ -115,6 +133,7 @@ export function addClipFromMedia(args: {
     sourceInMs: 0,
     sourceOutMs: source.durationMs,
     label: source.name,
+    linkGroupId: args.linkGroupId,
   }
 
   return {
@@ -128,8 +147,8 @@ export function addClipFromMedia(args: {
 }
 
 /**
- * Place a library item on the timeline. AV files create both a video-row clip
- * and an audio-row clip that share the same mediaSourceId.
+ * Place a library item on the timeline after existing clips on each target row.
+ * AV files create linked video + audio clips that share a linkGroupId.
  */
 export function addMediaToTimeline(args: {
   document: ProjectDocument
@@ -141,7 +160,6 @@ export function addMediaToTimeline(args: {
     return { ok: false, error: 'Media source not found.' }
   }
 
-  const timelineStartMs = args.timelineStartMs
   const roles: Track['kind'][] = []
   if (source.hasVideo) roles.push('video')
   if (source.hasAudio) roles.push('audio')
@@ -149,6 +167,19 @@ export function addMediaToTimeline(args: {
     return { ok: false, error: 'Media has no playable streams.' }
   }
 
+  let timelineStartMs = args.timelineStartMs
+  if (timelineStartMs == null) {
+    let endMs = 0
+    for (const role of roles) {
+      const track = args.document.tracks.find((item) => item.kind === role)
+      if (track) {
+        endMs = Math.max(endMs, getTrackContentEndMs(args.document, track.id))
+      }
+    }
+    timelineStartMs = endMs
+  }
+
+  const linkGroupId = roles.length > 1 ? createId('link') : undefined
   let document = args.document
   const clipIds: string[] = []
 
@@ -158,6 +189,7 @@ export function addMediaToTimeline(args: {
       mediaSourceId: args.mediaSourceId,
       role,
       timelineStartMs,
+      linkGroupId,
     })
     if (!result.ok) return result
     document = result.document
@@ -172,21 +204,250 @@ export function addMediaToTimeline(args: {
   }
 }
 
+export function unlinkClip(
+  document: ProjectDocument,
+  clipId: string,
+): OperationResult {
+  const group = getLinkedClips(document, clipId)
+  if (group.length <= 1) {
+    const clip = getClipById(document, clipId)
+    if (!clip) return { ok: false, error: 'Clip not found.' }
+    if (!clip.linkGroupId) return { ok: true, document }
+    return {
+      ok: true,
+      document: replaceClip(document, { ...clip, linkGroupId: undefined }),
+    }
+  }
+
+  return {
+    ok: true,
+    document: replaceClips(
+      document,
+      group.map((clip) => ({ ...clip, linkGroupId: undefined })),
+    ),
+  }
+}
+
+/**
+ * Link a clip to its natural AV counterpart (same media source, other track kind)
+ * or to another unlinked clip already sharing the same media source.
+ */
+export function linkClip(
+  document: ProjectDocument,
+  clipId: string,
+): OperationResult {
+  const clip = getClipById(document, clipId)
+  if (!clip) return { ok: false, error: 'Clip not found.' }
+
+  if (clip.linkGroupId) {
+    const group = getLinkedClips(document, clipId)
+    if (group.length > 1) {
+      return { ok: false, error: 'Clip is already linked.' }
+    }
+  }
+
+  const clipTrack = getTrackById(document, clip.trackId)
+  if (!clipTrack) return { ok: false, error: 'Clip track not found.' }
+
+  const partner = document.clips.find((candidate) => {
+    if (candidate.id === clip.id) return false
+    if (candidate.mediaSourceId !== clip.mediaSourceId) return false
+    if (candidate.linkGroupId) return false
+    const track = getTrackById(document, candidate.trackId)
+    return track != null && track.kind !== clipTrack.kind
+  })
+
+  if (!partner) {
+    return {
+      ok: false,
+      error: 'No unlinked audio/video pair found for this clip.',
+    }
+  }
+
+  const linkGroupId = createId('link')
+  return {
+    ok: true,
+    document: replaceClips(document, [
+      { ...clip, linkGroupId },
+      { ...partner, linkGroupId },
+    ]),
+  }
+}
+
 export function deleteClip(
   document: ProjectDocument,
   clipId: string,
 ): OperationResult {
-  if (!getClipById(document, clipId)) {
+  const clip = getClipById(document, clipId)
+  if (!clip) {
     return { ok: false, error: 'Clip not found.' }
+  }
+
+  // Removing one clip leaves partners behind, unlinked.
+  let nextDocument = document
+  if (clip.linkGroupId) {
+    const unlinkResult = unlinkClip(document, clipId)
+    if (!unlinkResult.ok) return unlinkResult
+    nextDocument = unlinkResult.document
   }
 
   return {
     ok: true,
     document: touchDocument({
-      ...document,
-      clips: document.clips.filter((clip) => clip.id !== clipId),
+      ...nextDocument,
+      clips: nextDocument.clips.filter((item) => item.id !== clipId),
     }),
   }
+}
+
+export function createTrack(args: {
+  document: ProjectDocument
+  kind: Track['kind']
+  order: number
+  name: string
+}): OperationResult {
+  const track: Track = {
+    id: createId('track'),
+    kind: args.kind,
+    order: args.order,
+    name: args.name,
+    muted: false,
+    locked: false,
+  }
+  return {
+    ok: true,
+    document: touchDocument({
+      ...args.document,
+      tracks: [...args.document.tracks, track],
+    }),
+  }
+}
+
+function rangesOverlap(
+  startMs: TimeMs,
+  durationMs: TimeMs,
+  candidate: Clip,
+): boolean {
+  const endMs = startMs + durationMs
+  const candidateEndMs =
+    candidate.timelineStartMs + (candidate.sourceOutMs - candidate.sourceInMs)
+  return startMs < candidateEndMs && endMs > candidate.timelineStartMs
+}
+
+function trackIsFreeAt(args: {
+  document: ProjectDocument
+  trackId: string
+  startMs: TimeMs
+  durationMs: TimeMs
+  ignoreClipIds: ReadonlySet<string>
+}): boolean {
+  return args.document.clips
+    .filter(
+      (candidate) =>
+        candidate.trackId === args.trackId &&
+        !args.ignoreClipIds.has(candidate.id),
+    )
+    .every(
+      (candidate) => !rangesOverlap(args.startMs, args.durationMs, candidate),
+    )
+}
+
+/**
+ * Prefer the clip's current lane; otherwise the first free lane of that kind.
+ * Video lanes grow upward (lower order); audio lanes grow downward (higher order).
+ */
+function resolveTrackWithoutOverlap(args: {
+  document: ProjectDocument
+  clip: Clip
+  kind: Track['kind']
+  startMs: TimeMs
+  ignoreClipIds: ReadonlySet<string>
+  preferredTrackId?: string
+}): { document: ProjectDocument; trackId: string } | { error: string } {
+  const durationMs = args.clip.sourceOutMs - args.clip.sourceInMs
+  const preferredId = args.preferredTrackId ?? args.clip.trackId
+
+  const isFree = (trackId: string) =>
+    trackIsFreeAt({
+      document: args.document,
+      trackId,
+      startMs: args.startMs,
+      durationMs,
+      ignoreClipIds: args.ignoreClipIds,
+    })
+
+  if (isFree(preferredId)) {
+    return { document: args.document, trackId: preferredId }
+  }
+
+  const open = args.document.tracks
+    .filter(
+      (track) =>
+        track.kind === args.kind &&
+        !track.locked &&
+        track.id !== preferredId,
+    )
+    .sort((a, b) => a.order - b.order)
+    .find((track) => isFree(track.id))
+
+  if (open) {
+    return { document: args.document, trackId: open.id }
+  }
+
+  const kindTracks = args.document.tracks.filter(
+    (track) => track.kind === args.kind,
+  )
+  const orders = kindTracks.map((track) => track.order)
+  const order =
+    args.kind === 'video'
+      ? (orders.length > 0 ? Math.min(...orders) : 0) - 1
+      : (orders.length > 0 ? Math.max(...orders) : 0) + 1
+
+  const created = createTrack({
+    document: args.document,
+    kind: args.kind,
+    order,
+    name: `${args.kind === 'video' ? 'Video' : 'Audio'} ${kindTracks.length + 1}`,
+  })
+  if (!created.ok) return { error: created.error }
+
+  const newTrack = created.document.tracks[created.document.tracks.length - 1]
+  if (!newTrack) return { error: 'Failed to create track.' }
+
+  return { document: created.document, trackId: newTrack.id }
+}
+
+function snapStartMsOnTrack(
+  document: ProjectDocument,
+  clip: Clip,
+  trackId: string,
+  startMs: TimeMs,
+  ignoreClipIds: ReadonlySet<string>,
+): TimeMs {
+  const durationMs = clip.sourceOutMs - clip.sourceInMs
+  const snapDistanceMs = 180
+  let nearest = startMs
+  let nearestDistance = snapDistanceMs + 1
+
+  for (const candidate of document.clips) {
+    if (candidate.trackId !== trackId) continue
+    if (ignoreClipIds.has(candidate.id)) continue
+    const candidateEndMs =
+      candidate.timelineStartMs +
+      (candidate.sourceOutMs - candidate.sourceInMs)
+    for (const point of [
+      candidateEndMs,
+      candidate.timelineStartMs - durationMs,
+    ]) {
+      const distance = Math.abs(startMs - point)
+      if (distance < nearestDistance) {
+        nearest = Math.max(0, point)
+        nearestDistance = distance
+      }
+    }
+  }
+
+  return nearest
 }
 
 export function moveClip(args: {
@@ -244,27 +505,101 @@ export function moveClip(args: {
   return { ok: true, document: replaceClip(args.document, nextClip) }
 }
 
-export function createTrack(args: {
+/**
+ * Move a clip (and linked AV partners) without allowing overlaps.
+ * Colliding video clips promote to a free / new video lane above;
+ * colliding audio clips demote to a free / new audio lane below.
+ */
+export function moveClipOnTimeline(args: {
   document: ProjectDocument
-  kind: Track['kind']
-  order: number
-  name: string
+  clipId: string
+  timelineStartMs: TimeMs
+  trackId?: string
 }): OperationResult {
-  const track: Track = {
-    id: createId('track'),
-    kind: args.kind,
-    order: args.order,
-    name: args.name,
-    muted: false,
-    locked: false,
+  const clip = getClipById(args.document, args.clipId)
+  if (!clip) {
+    return { ok: false, error: 'Clip not found.' }
   }
-  return {
-    ok: true,
-    document: touchDocument({
-      ...args.document,
-      tracks: [...args.document.tracks, track],
-    }),
+
+  const linked = getLinkedClips(args.document, args.clipId)
+  const movingLinkedGroup = linked.length > 1 && args.trackId == null
+  const targets = (movingLinkedGroup ? linked : [clip])
+    .slice()
+    .sort((a, b) => {
+      const aKind = getTrackById(args.document, a.trackId)?.kind
+      const bKind = getTrackById(args.document, b.trackId)?.kind
+      if (aKind === bKind) return 0
+      if (aKind === 'video') return -1
+      if (bKind === 'video') return 1
+      return 0
+    })
+  const ignoreClipIds = new Set(targets.map((item) => item.id))
+  const deltaMs = Math.round(args.timelineStartMs) - clip.timelineStartMs
+
+  let document = args.document
+
+  for (const target of targets) {
+    const targetTrack = getTrackById(document, target.trackId)
+    if (!targetTrack) {
+      return { ok: false, error: 'Clip track not found.' }
+    }
+
+    let nextStartMs =
+      target.id === args.clipId
+        ? Math.max(0, Math.round(args.timelineStartMs))
+        : Math.max(0, target.timelineStartMs + deltaMs)
+
+    const preferredTrackId =
+      target.id === args.clipId && args.trackId
+        ? args.trackId
+        : target.trackId
+
+    if (!movingLinkedGroup) {
+      nextStartMs = snapStartMsOnTrack(
+        document,
+        target,
+        preferredTrackId,
+        nextStartMs,
+        ignoreClipIds,
+      )
+    }
+
+    const resolved = resolveTrackWithoutOverlap({
+      document,
+      clip: target,
+      kind: targetTrack.kind,
+      startMs: nextStartMs,
+      ignoreClipIds,
+      preferredTrackId,
+    })
+    if ('error' in resolved) {
+      return { ok: false, error: resolved.error }
+    }
+
+    document = resolved.document
+
+    // If the preferred lane was full, keep the requested start time on the
+    // newly resolved free lane (don't re-snap into another collision).
+    if (!movingLinkedGroup && resolved.trackId !== preferredTrackId) {
+      nextStartMs = Math.max(
+        0,
+        target.id === args.clipId
+          ? Math.round(args.timelineStartMs)
+          : target.timelineStartMs + deltaMs,
+      )
+    }
+
+    const result = moveClip({
+      document,
+      clipId: target.id,
+      timelineStartMs: nextStartMs,
+      trackId: resolved.trackId,
+    })
+    if (!result.ok) return result
+    document = result.document
   }
+
+  return { ok: true, document }
 }
 
 export function trimClip(args: {

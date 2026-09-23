@@ -1,8 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import {
   getWaveformPeaks,
   samplePeakWindow,
 } from '@/lib/media/waveform'
+
+/** Cap drawing resolution so very wide (zoomed) clips stay responsive. */
+const MAX_CANVAS_WIDTH = 960
+const MAX_BARS = 180
+
+function cappedDrawWidth(widthPx: number): number {
+  return Math.max(8, Math.min(MAX_CANVAS_WIDTH, Math.floor(widthPx) || 8))
+}
 
 export function AudioWaveform({
   mediaSourceId,
@@ -19,78 +27,70 @@ export function AudioWaveform({
   mediaDurationMs: number
   widthPx: number
 }) {
-  const [peaks, setPeaks] = useState<Float32Array | null>(null)
-  const [loadedFor, setLoadedFor] = useState<string | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const drawWidth = cappedDrawWidth(widthPx)
 
   useEffect(() => {
     let cancelled = false
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const barCount = Math.max(8, Math.min(MAX_BARS, Math.floor(drawWidth / 3)))
+    const height = 64
+
+    canvas.width = drawWidth
+    canvas.height = height
+
+    const context = canvas.getContext('2d')
+    if (!context) return
+
+    context.clearRect(0, 0, drawWidth, height)
+    context.fillStyle = '#16352c'
+    context.fillRect(0, 0, drawWidth, height)
+
     void getWaveformPeaks(mediaSourceId, src)
-      .then((next) => {
+      .then((peaks) => {
         if (cancelled) return
-        setPeaks(next)
-        setLoadedFor(mediaSourceId)
+        const bars = samplePeakWindow(
+          peaks,
+          sourceInMs,
+          sourceOutMs,
+          mediaDurationMs,
+          barCount,
+        )
+        context.clearRect(0, 0, drawWidth, height)
+        context.fillStyle = '#16352c'
+        context.fillRect(0, 0, drawWidth, height)
+        context.fillStyle = 'rgba(110, 220, 170, 0.85)'
+
+        const midY = height / 2
+        const step = drawWidth / barCount
+        for (let index = 0; index < bars.length; index += 1) {
+          const amplitude = bars[index] ?? 0
+          const barHeight = Math.max(2, amplitude * (height * 0.82))
+          const x = index * step
+          context.fillRect(
+            x,
+            midY - barHeight / 2,
+            Math.max(1, step * 0.7),
+            barHeight,
+          )
+        }
       })
       .catch(() => {
-        if (cancelled) return
-        setPeaks(null)
-        setLoadedFor(mediaSourceId)
+        // Keep the solid fallback fill already painted.
       })
+
     return () => {
       cancelled = true
     }
-  }, [mediaSourceId, src])
-
-  const ready = loadedFor === mediaSourceId && peaks != null
-  const barCount = Math.max(8, Math.min(240, Math.floor(widthPx / 2)))
-
-  const bars = useMemo(() => {
-    if (!ready || !peaks) return null
-    return samplePeakWindow(
-      peaks,
-      sourceInMs,
-      sourceOutMs,
-      mediaDurationMs,
-      barCount,
-    )
-  }, [barCount, mediaDurationMs, peaks, ready, sourceInMs, sourceOutMs])
-
-  if (!bars) {
-    return (
-      <div
-        className="pointer-events-none absolute inset-0 opacity-40"
-        style={{
-          backgroundImage:
-            'repeating-linear-gradient(90deg, transparent 0 7px, rgba(22, 101, 52, 0.35) 8px 10px, transparent 11px 18px)',
-        }}
-        aria-hidden
-      />
-    )
-  }
-
-  const midY = 50
+  }, [drawWidth, mediaDurationMs, mediaSourceId, sourceInMs, sourceOutMs, src])
 
   return (
-    <svg
-      className="pointer-events-none absolute inset-0 h-full w-full opacity-80"
-      viewBox={`0 0 ${barCount * 2} 100`}
-      preserveAspectRatio="none"
+    <canvas
+      ref={canvasRef}
+      className="pointer-events-none h-full w-full"
       aria-hidden
-    >
-      {Array.from(bars, (amplitude, index) => {
-        const height = Math.max(2, amplitude * 78)
-        const x = index * 2
-        return (
-          <rect
-            key={index}
-            x={x}
-            y={midY - height / 2}
-            width={1.4}
-            height={height}
-            rx={0.4}
-            fill="rgb(21 128 61)"
-          />
-        )
-      })}
-    </svg>
+    />
   )
 }

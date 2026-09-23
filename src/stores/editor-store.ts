@@ -4,20 +4,21 @@ import { temporal } from 'zundo'
 import {
   addMediaSource,
   addMediaToTimeline,
-  createTrack,
   deleteClip,
-  moveClip,
+  linkClip,
+  moveClipOnTimeline,
   removeMediaSource,
   renameProject,
   trimClip,
+  unlinkClip,
   updateClipLabel,
 } from '@/features/editor/operations'
 import { getPlaybackEndMs } from '@/features/editor/playback'
-import { createEmptyProject } from '@/features/editor/project'
+import { createEmptyProject, getLinkedClips } from '@/features/editor/project'
 import { revokeObjectUrl } from '@/lib/media/object-urls'
 import { clearWaveformPeaks } from '@/lib/media/waveform'
 import type { ClipDragState, EditorUiState } from '@/types/editor'
-import type { Clip, MediaSource, ProjectDocument, TimeMs, Track } from '@/types/timeline'
+import type { MediaSource, ProjectDocument, TimeMs } from '@/types/timeline'
 import { clamp } from '@/utils/time'
 
 interface EditorActions {
@@ -52,6 +53,8 @@ interface EditorActions {
       timelineStartMs?: TimeMs
     },
   ) => boolean
+  linkSelectedClip: () => boolean
+  unlinkSelectedClip: () => boolean
   updateSelectedClipLabel: (label: string) => boolean
 }
 
@@ -79,59 +82,6 @@ const initialUi: EditorUiState = {
 
 function documentsEqual(a: ProjectDocument, b: ProjectDocument): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
-}
-
-function overlaps(
-  startMs: number,
-  durationMs: number,
-  candidate: Clip,
-): boolean {
-  const endMs = startMs + durationMs
-  const candidateEndMs = candidate.timelineStartMs +
-    (candidate.sourceOutMs - candidate.sourceInMs)
-  return startMs < candidateEndMs && endMs > candidate.timelineStartMs
-}
-
-function snapStartMs(
-  document: ProjectDocument,
-  clip: Clip,
-  trackId: string,
-  startMs: number,
-): number {
-  const durationMs = clip.sourceOutMs - clip.sourceInMs
-  const snapDistanceMs = 180
-  let nearest = startMs
-  let nearestDistance = snapDistanceMs + 1
-  for (const candidate of document.clips) {
-    if (candidate.id === clip.id || candidate.trackId !== trackId) continue
-    const candidateEndMs = candidate.timelineStartMs +
-      (candidate.sourceOutMs - candidate.sourceInMs)
-    for (const point of [candidateEndMs, candidate.timelineStartMs - durationMs]) {
-      const distance = Math.abs(startMs - point)
-      if (distance < nearestDistance) {
-        nearest = Math.max(0, point)
-        nearestDistance = distance
-      }
-    }
-  }
-  return nearest
-}
-
-function findOpenTrack(
-  document: ProjectDocument,
-  clip: Clip,
-  kind: Track['kind'],
-  startMs: number,
-): Track | undefined {
-  const durationMs = clip.sourceOutMs - clip.sourceInMs
-  return document.tracks
-    .filter((track) => track.kind === kind && !track.locked)
-    .sort((a, b) => a.order - b.order)
-    .find((track) =>
-      document.clips
-        .filter((candidate) => candidate.trackId === track.id && candidate.id !== clip.id)
-        .every((candidate) => !overlaps(startMs, durationMs, candidate)),
-    )
 }
 
 const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
@@ -365,11 +315,10 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
   },
 
   addClip: (mediaSourceId, timelineStartMs) => {
-    const startMs = timelineStartMs ?? get().ui.playheadMs
     const result = addMediaToTimeline({
       document: get().document,
       mediaSourceId,
-      timelineStartMs: startMs,
+      timelineStartMs,
     })
     if (!result.ok) {
       get().setImportError(result.error)
@@ -384,11 +333,6 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
         saveStatus: 'unsaved',
       },
     })
-    // Route each new instance through placement rules so timeline clips
-    // never remain overlapped after an insert at the playhead.
-    for (const clipId of result.clipIds ?? []) {
-      get().moveClipTo(clipId, startMs)
-    }
     return true
   },
 
@@ -409,67 +353,11 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
   },
 
   moveClipTo: (clipId, timelineStartMs, trackId) => {
-    let document = get().document
-    const clip = document.clips.find((item) => item.id === clipId)
-    if (!clip) return false
-    const source = document.mediaSources.find(
-      (item) => item.id === clip.mediaSourceId,
-    )
-    if (!source) return false
-
-    const currentTrack = document.tracks.find((track) => track.id === clip.trackId)
-    const placementKind = currentTrack?.kind
-    if (!placementKind) return false
-
-    let destinationTrackId = trackId ?? clip.trackId
-    let snappedStartMs = snapStartMs(
-      document,
-      clip,
-      destinationTrackId,
-      timelineStartMs,
-    )
-    const destinationTrack = document.tracks.find(
-      (track) => track.id === destinationTrackId,
-    )
-    if (!destinationTrack) return false
-
-    const destinationHasOverlap = document.clips
-      .filter((candidate) => candidate.trackId === destinationTrackId && candidate.id !== clip.id)
-      .some((candidate) =>
-        overlaps(
-          snappedStartMs,
-          clip.sourceOutMs - clip.sourceInMs,
-          candidate,
-        ),
-      )
-
-    if (destinationHasOverlap) {
-      const openTrack = findOpenTrack(document, clip, placementKind, snappedStartMs)
-      if (openTrack) {
-        destinationTrackId = openTrack.id
-      } else {
-        const kindTracks = document.tracks.filter((track) => track.kind === placementKind)
-        const order = placementKind === 'video'
-          ? Math.min(...kindTracks.map((track) => track.order)) - 1
-          : Math.max(...kindTracks.map((track) => track.order)) + 1
-        const created = createTrack({
-          document,
-          kind: placementKind,
-          order,
-          name: `${placementKind === 'video' ? 'Video' : 'Audio'} ${kindTracks.length + 1}`,
-        })
-        if (!created.ok) return false
-        document = created.document
-        destinationTrackId = document.tracks[document.tracks.length - 1].id
-      }
-      snappedStartMs = timelineStartMs
-    }
-
-    const result = moveClip({
-      document,
+    const result = moveClipOnTimeline({
+      document: get().document,
       clipId,
-      timelineStartMs: snappedStartMs,
-      trackId: destinationTrackId,
+      timelineStartMs,
+      trackId,
     })
     if (!result.ok) return false
     set({
@@ -480,18 +368,70 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
   },
 
   trimClipTo: (clipId, args) => {
-    const result = trimClip({
-      document: get().document,
+    let document = get().document
+    const clip = document.clips.find((item) => item.id === clipId)
+    if (!clip) return false
+
+    const linked = getLinkedClips(document, clipId)
+    const targets = linked.length > 1 ? linked : [clip]
+
+    const primaryResult = trimClip({
+      document,
       clipId,
       ...args,
     })
+    if (!primaryResult.ok) return false
+    document = primaryResult.document
+
+    const trimmedPrimary = document.clips.find((item) => item.id === clipId)
+    if (!trimmedPrimary) return false
+
+    if (targets.length > 1) {
+      for (const member of targets) {
+        if (member.id === clipId) continue
+        const result = trimClip({
+          document,
+          clipId: member.id,
+          sourceInMs: trimmedPrimary.sourceInMs,
+          sourceOutMs: trimmedPrimary.sourceOutMs,
+          timelineStartMs: trimmedPrimary.timelineStartMs,
+        })
+        if (!result.ok) return false
+        document = result.document
+      }
+    }
+
+    set({
+      document,
+      ui: { ...get().ui, saveStatus: 'unsaved' },
+    })
+    return true
+  },
+
+  linkSelectedClip: () => {
+    const clipId = get().ui.selectedClipId
+    if (!clipId) return false
+    const result = linkClip(get().document, clipId)
+    if (!result.ok) {
+      get().setImportError(result.error)
+      return false
+    }
+    set({
+      document: result.document,
+      ui: { ...get().ui, importError: null, saveStatus: 'unsaved' },
+    })
+    return true
+  },
+
+  unlinkSelectedClip: () => {
+    const clipId = get().ui.selectedClipId
+    if (!clipId) return false
+    const result = unlinkClip(get().document, clipId)
     if (!result.ok) return false
     set({
       document: result.document,
       ui: { ...get().ui, saveStatus: 'unsaved' },
     })
-    const trimmedClip = result.document.clips.find((clip) => clip.id === clipId)
-    if (trimmedClip) get().moveClipTo(clipId, trimmedClip.timelineStartMs)
     return true
   },
 

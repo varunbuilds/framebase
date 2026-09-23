@@ -1,4 +1,4 @@
-import { Film, Music2, ZoomIn, ZoomOut } from 'lucide-react'
+import { Film, Link2, Link2Off, Music2, ZoomIn, ZoomOut } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -9,6 +9,7 @@ import {
 } from 'react'
 import { AudioWaveform } from '@/components/timeline/AudioWaveform'
 import {
+  getLinkedClips,
   getMediaSourceById,
   getSortedTracks,
   getTimelineDurationMs,
@@ -48,8 +49,16 @@ function pxToMs(px: number, pixelsPerSecond: number): number {
   return Math.round((px / pixelsPerSecond) * 1000)
 }
 
-function VideoFilmstrip({ src, durationMs }: { src: string; durationMs: number }) {
+function VideoFilmstrip({
+  src,
+  durationMs,
+}: {
+  src: string
+  durationMs: number
+}) {
   const [frames, setFrames] = useState<string[]>([])
+  // Duration-based frame count — avoid re-decoding on every zoom width change.
+  const frameCount = Math.max(3, Math.min(12, Math.ceil(durationMs / 1500)))
 
   useEffect(() => {
     let cancelled = false
@@ -57,30 +66,30 @@ function VideoFilmstrip({ src, durationMs }: { src: string; durationMs: number }
     video.src = src
     video.muted = true
     video.preload = 'auto'
+    video.playsInline = true
 
     const captureFrames = async () => {
       const duration = Number.isFinite(video.duration)
         ? Math.min(video.duration, durationMs / 1000)
         : durationMs / 1000
-      const count = Math.max(3, Math.min(8, Math.ceil(duration / 2)))
       const nextFrames: string[] = []
       const canvas = document.createElement('canvas')
-      canvas.width = 160
-      canvas.height = 90
+      canvas.width = 120
+      canvas.height = 68
       const context = canvas.getContext('2d')
       if (!context) return
-      for (let index = 0; index < count; index += 1) {
+      for (let index = 0; index < frameCount; index += 1) {
         await new Promise<void>((resolve) => {
           video.onseeked = () => resolve()
           video.onerror = () => resolve()
           video.currentTime = Math.min(
             Math.max(0, duration - 0.05),
-            (duration * (index + 0.5)) / count,
+            (duration * (index + 0.5)) / frameCount,
           )
         })
         if (cancelled) return
         context.drawImage(video, 0, 0, canvas.width, canvas.height)
-        nextFrames.push(canvas.toDataURL('image/jpeg', 0.72))
+        nextFrames.push(canvas.toDataURL('image/jpeg', 0.7))
       }
       if (!cancelled) setFrames(nextFrames)
     }
@@ -93,17 +102,21 @@ function VideoFilmstrip({ src, durationMs }: { src: string; durationMs: number }
       video.removeAttribute('src')
       video.load()
     }
-  }, [durationMs, src])
+  }, [durationMs, frameCount, src])
 
-  if (frames.length === 0) return null
+  if (frames.length === 0) {
+    return <div className="h-full w-full bg-[#1a2228]" aria-hidden />
+  }
+
   return (
-    <div className="pointer-events-none absolute inset-0 flex overflow-hidden opacity-70" aria-hidden>
+    <div className="pointer-events-none flex h-full w-full overflow-hidden" aria-hidden>
       {frames.map((frame, index) => (
         <img
           key={`${index}-${frame.slice(-12)}`}
           src={frame}
           className="h-full min-w-0 flex-1 object-cover"
           alt=""
+          draggable={false}
         />
       ))}
     </div>
@@ -115,6 +128,7 @@ function TimelineClipBlock({
   track,
   pixelsPerSecond,
   selected,
+  linkedHighlight,
   dragDeltaMs,
   onSelect,
   onPointerDownMove,
@@ -124,6 +138,7 @@ function TimelineClipBlock({
   track: Track
   pixelsPerSecond: number
   selected: boolean
+  linkedHighlight: boolean
   dragDeltaMs: number
   onSelect: () => void
   onPointerDownMove: (clientX: number) => void
@@ -137,23 +152,28 @@ function TimelineClipBlock({
   let sourceInMs = clip.sourceInMs
   let sourceOutMs = clip.sourceOutMs
 
-  if (drag && drag.clipId === clip.id) {
+  const isDragParticipant =
+    drag != null &&
+    (drag.clipId === clip.id ||
+      (Boolean(drag.linkGroupId) && clip.linkGroupId === drag.linkGroupId))
+
+  if (isDragParticipant && drag) {
     if (drag.mode === 'move') {
-      timelineStartMs = Math.max(0, drag.originTimelineStartMs + dragDeltaMs)
+      timelineStartMs = Math.max(0, clip.timelineStartMs + dragDeltaMs)
     } else if (drag.mode === 'trim-in') {
       const nextIn = clamp(
-        drag.originSourceInMs + dragDeltaMs,
+        clip.sourceInMs + dragDeltaMs,
         0,
-        drag.originSourceOutMs - 100,
+        clip.sourceOutMs - 100,
       )
-      const delta = nextIn - drag.originSourceInMs
+      const delta = nextIn - clip.sourceInMs
       sourceInMs = nextIn
-      timelineStartMs = Math.max(0, drag.originTimelineStartMs + delta)
+      timelineStartMs = Math.max(0, clip.timelineStartMs + delta)
     } else if (drag.mode === 'trim-out') {
-      const maxOut = media?.durationMs ?? drag.originSourceOutMs
+      const maxOut = media?.durationMs ?? clip.sourceOutMs
       sourceOutMs = clamp(
-        drag.originSourceOutMs + dragDeltaMs,
-        drag.originSourceInMs + 100,
+        clip.sourceOutMs + dragDeltaMs,
+        clip.sourceInMs + 100,
         maxOut,
       )
     }
@@ -164,12 +184,13 @@ function TimelineClipBlock({
   const width = Math.max(8, msToPx(durationMs, pixelsPerSecond))
   const isVideo = track.kind === 'video'
   const objectUrl = media ? getObjectUrl(media.id) : undefined
+  const title = clip.label ?? media?.name ?? 'Clip'
 
   return (
     <div
       role="button"
       tabIndex={0}
-      aria-label={`${clip.label ?? media?.name ?? 'Clip'} on ${track.name}`}
+      aria-label={`${title} on ${track.name}`}
       aria-pressed={selected}
       onClick={(event) => {
         event.stopPropagation()
@@ -189,58 +210,62 @@ function TimelineClipBlock({
         onSelect()
         onPointerDownMove(event.clientX)
       }}
-      className={`absolute top-1.5 flex h-[calc(100%-12px)] cursor-grab items-stretch overflow-hidden rounded-sm border active:cursor-grabbing ${
+      className={`absolute top-1.5 flex h-[calc(100%-12px)] cursor-grab flex-col overflow-hidden border active:cursor-grabbing ${
         isVideo
-          ? 'border-fb-video-border bg-fb-video'
-          : 'border-fb-audio-border bg-fb-audio'
-      } ${selected ? 'ring-1 ring-fb-accent ring-offset-1 ring-offset-fb-surface' : ''}`}
+          ? 'border-[#2a3a45] bg-[#151c22]'
+          : 'border-[#1f3d34] bg-[#13241f]'
+      } ${
+        selected
+          ? 'ring-1 ring-fb-accent'
+          : linkedHighlight
+            ? 'ring-1 ring-fb-accent/70'
+            : ''
+      }`}
       style={{ left, width }}
     >
-      {isVideo && objectUrl ? (
-        <VideoFilmstrip src={objectUrl} durationMs={durationMs} />
-      ) : objectUrl && media ? (
-        <AudioWaveform
-          mediaSourceId={media.id}
-          src={objectUrl}
-          sourceInMs={sourceInMs}
-          sourceOutMs={sourceOutMs}
-          mediaDurationMs={media.durationMs}
-          widthPx={width}
-        />
-      ) : (
-        <div
-          className="pointer-events-none absolute inset-0 opacity-60"
-          style={{
-            backgroundImage:
-              'repeating-linear-gradient(90deg, transparent 0 7px, rgba(116, 225, 183, .38) 8px 10px, transparent 11px 18px)',
-          }}
-          aria-hidden
-        />
-      )}
+      <div className="relative z-10 flex h-[22px] shrink-0 items-center bg-[#243038] px-2">
+        <span className="truncate text-[10px] font-medium leading-none text-white/90">
+          {title}
+        </span>
+      </div>
+
+      <div
+        className={`relative min-h-0 flex-1 overflow-hidden ${
+          isVideo ? 'bg-[#1a2228]' : 'bg-[#16352c]'
+        }`}
+      >
+        {isVideo && objectUrl ? (
+          <VideoFilmstrip src={objectUrl} durationMs={durationMs} />
+        ) : objectUrl && media ? (
+          <AudioWaveform
+            mediaSourceId={media.id}
+            src={objectUrl}
+            sourceInMs={sourceInMs}
+            sourceOutMs={sourceOutMs}
+            mediaDurationMs={media.durationMs}
+            widthPx={width}
+          />
+        ) : (
+          <div className="h-full w-full bg-black/20" aria-hidden />
+        )}
+      </div>
+
       <button
         type="button"
         data-trim="in"
         aria-label="Trim clip start"
-        className="w-1.5 shrink-0 cursor-ew-resize bg-black/10 hover:bg-black/25"
+        className="absolute inset-y-0 left-0 z-20 w-1.5 cursor-ew-resize bg-transparent hover:bg-white/25"
         onPointerDown={(event) => {
           event.stopPropagation()
           onSelect()
           onPointerDownTrim('trim-in', event.clientX)
         }}
       />
-      <div className="relative z-10 min-w-0 flex-1 px-2 py-2">
-        <div className="truncate text-[10px] font-medium text-fb-text">
-          {clip.label ?? media?.name ?? 'Clip'}
-        </div>
-        <div className="truncate text-[9px] text-fb-muted">
-          {formatTimecode(durationMs)}
-        </div>
-      </div>
       <button
         type="button"
         data-trim="out"
         aria-label="Trim clip end"
-        className="w-1.5 shrink-0 cursor-ew-resize bg-black/10 hover:bg-black/25"
+        className="absolute inset-y-0 right-0 z-20 w-1.5 cursor-ew-resize bg-transparent hover:bg-white/25"
         onPointerDown={(event) => {
           event.stopPropagation()
           onSelect()
@@ -275,6 +300,8 @@ export function TimelinePanel() {
   const moveClipTo = useEditorStore((state) => state.moveClipTo)
   const trimClipTo = useEditorStore((state) => state.trimClipTo)
   const removeClip = useEditorStore((state) => state.removeClip)
+  const linkSelectedClip = useEditorStore((state) => state.linkSelectedClip)
+  const unlinkSelectedClip = useEditorStore((state) => state.unlinkSelectedClip)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const dragDeltaMsRef = useRef(0)
@@ -285,6 +312,33 @@ export function TimelinePanel() {
 
   const tracks = getSortedTracks(document)
   const durationMs = getTimelineDurationMs(document)
+  const selectedClip = selectedClipId
+    ? document.clips.find((clip) => clip.id === selectedClipId)
+    : undefined
+  const selectedLinkGroupId = selectedClip?.linkGroupId
+  const selectedIsLinked = Boolean(
+    selectedClipId && getLinkedClips(document, selectedClipId).length > 1,
+  )
+  const canLinkSelected = Boolean(
+    selectedClip &&
+      !selectedIsLinked &&
+      document.clips.some((candidate) => {
+        if (candidate.id === selectedClip.id) return false
+        if (candidate.mediaSourceId !== selectedClip.mediaSourceId) return false
+        if (candidate.linkGroupId) return false
+        const selectedTrack = document.tracks.find(
+          (track) => track.id === selectedClip.trackId,
+        )
+        const candidateTrack = document.tracks.find(
+          (track) => track.id === candidate.trackId,
+        )
+        return (
+          selectedTrack != null &&
+          candidateTrack != null &&
+          selectedTrack.kind !== candidateTrack.kind
+        )
+      }),
+  )
   const contentWidth = Math.max(
     800,
     viewportWidth,
@@ -327,6 +381,22 @@ export function TimelinePanel() {
     },
     [pixelsPerSecond, setPixelsPerSecond],
   )
+
+  useEffect(() => {
+    const viewport = scrollRef.current
+    if (!viewport) return
+
+    // Non-passive so ctrl/meta+wheel never falls through to browser page-zoom,
+    // including when timeline zoom is already at min/max.
+    const onWheel = (event: WheelEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return
+      event.preventDefault()
+      zoomAtClientX(event.clientX, event.deltaY < 0 ? 1 : -1)
+    }
+
+    viewport.addEventListener('wheel', onWheel, { passive: false })
+    return () => viewport.removeEventListener('wheel', onWheel)
+  }, [zoomAtClientX])
 
   const rulerMarks = useMemo(() => {
     const marks: Array<{ ms: number; major: boolean }> = []
@@ -561,6 +631,32 @@ export function TimelinePanel() {
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
           Timeline
         </h2>
+        {selectedClipId && (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => unlinkSelectedClip()}
+              disabled={!selectedIsLinked}
+              aria-label="Unlink clip"
+              title="Unlink"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-fb-border px-2 text-[11px] text-fb-muted disabled:cursor-not-allowed disabled:opacity-35 hover:enabled:bg-white/[0.06] hover:enabled:text-fb-text"
+            >
+              <Link2Off size={12} strokeWidth={1.75} />
+              Unlink
+            </button>
+            <button
+              type="button"
+              onClick={() => linkSelectedClip()}
+              disabled={!canLinkSelected}
+              aria-label="Link clip"
+              title="Link"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-fb-border px-2 text-[11px] text-fb-muted disabled:cursor-not-allowed disabled:opacity-35 hover:enabled:bg-white/[0.06] hover:enabled:text-fb-text"
+            >
+              <Link2 size={12} strokeWidth={1.75} />
+              Link
+            </button>
+          </div>
+        )}
         <div className="ml-auto flex items-center gap-2">
           <ZoomOut
             size={12}
@@ -620,15 +716,17 @@ export function TimelinePanel() {
           className="relative min-w-0 flex-1 overflow-auto"
           onClick={() => selectClip(null)}
           onScroll={(event) => setTimelineScrollLeft(event.currentTarget.scrollLeft)}
-          onWheel={(event) => {
-            if (!(event.ctrlKey || event.metaKey)) return
-            event.preventDefault()
-            zoomAtClientX(event.clientX, event.deltaY < 0 ? 1 : -1)
-          }}
         >
-          <div style={{ width: contentWidth, minWidth: '100%', minHeight: '100%' }}>
+          <div
+            className="relative"
+            style={{
+              width: contentWidth,
+              minWidth: '100%',
+              minHeight: `max(100%, ${RULER_HEIGHT + tracks.length * TRACK_HEIGHT}px)`,
+            }}
+          >
             <div
-              className="relative border-b border-fb-border bg-fb-ruler"
+              className="relative cursor-ew-resize border-b border-fb-border bg-fb-ruler"
               style={{ height: RULER_HEIGHT }}
               onPointerDown={(event) => {
                 event.preventDefault()
@@ -662,7 +760,7 @@ export function TimelinePanel() {
             {tracks.map((track) => (
               <div
                 key={track.id}
-              className="relative border-b border-fb-border bg-fb-surface"
+                className="relative border-b border-fb-border bg-fb-surface"
                 style={{ height: TRACK_HEIGHT }}
                 onPointerDown={(event) => {
                   if (event.target !== event.currentTarget) return
@@ -680,8 +778,18 @@ export function TimelinePanel() {
                       track={track}
                       pixelsPerSecond={pixelsPerSecond}
                       selected={clip.id === selectedClipId}
+                      linkedHighlight={
+                        clip.id !== selectedClipId &&
+                        Boolean(selectedLinkGroupId) &&
+                        clip.linkGroupId === selectedLinkGroupId
+                      }
                       dragDeltaMs={
-                        clipDrag?.clipId === clip.id ? dragDeltaMs : 0
+                        clipDrag &&
+                        (clipDrag.clipId === clip.id ||
+                          (Boolean(clipDrag.linkGroupId) &&
+                            clip.linkGroupId === clipDrag.linkGroupId))
+                          ? dragDeltaMs
+                          : 0
                       }
                       onSelect={() => selectClip(clip.id)}
                       onPointerDownMove={(clientX) => {
@@ -694,6 +802,7 @@ export function TimelinePanel() {
                           originTimelineStartMs: clip.timelineStartMs,
                           originSourceInMs: clip.sourceInMs,
                           originSourceOutMs: clip.sourceOutMs,
+                          linkGroupId: clip.linkGroupId,
                         })
                       }}
                       onPointerDownTrim={(edge, clientX) => {
@@ -706,6 +815,7 @@ export function TimelinePanel() {
                           originTimelineStartMs: clip.timelineStartMs,
                           originSourceInMs: clip.sourceInMs,
                           originSourceOutMs: clip.sourceOutMs,
+                          linkGroupId: clip.linkGroupId,
                         })
                       }}
                     />
@@ -714,7 +824,7 @@ export function TimelinePanel() {
             ))}
 
             <div
-              className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-fb-playhead/80"
+              className="pointer-events-none absolute inset-y-0 z-10 w-px bg-fb-playhead/80"
               style={{ left: playheadLeft }}
               aria-hidden
             >

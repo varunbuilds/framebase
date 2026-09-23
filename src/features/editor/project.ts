@@ -72,6 +72,26 @@ export function getClipsForTrack(
     .sort((a, b) => a.timelineStartMs - b.timelineStartMs)
 }
 
+/** End time of the last clip on a track (0 when empty). */
+export function getTrackContentEndMs(
+  document: ProjectDocument,
+  trackId: string,
+): number {
+  return getClipsForTrack(document, trackId).reduce((max, clip) => {
+    const end = clip.timelineStartMs + (clip.sourceOutMs - clip.sourceInMs)
+    return Math.max(max, end)
+  }, 0)
+}
+
+export function getLinkedClips(
+  document: ProjectDocument,
+  clipId: string,
+): Clip[] {
+  const clip = getClipById(document, clipId)
+  if (!clip?.linkGroupId) return clip ? [clip] : []
+  return document.clips.filter((item) => item.linkGroupId === clip.linkGroupId)
+}
+
 export function getSortedTracks(document: ProjectDocument): Track[] {
   return [...document.tracks].sort((a, b) => a.order - b.order)
 }

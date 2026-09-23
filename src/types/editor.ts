@@ -26,6 +26,7 @@ export interface ClipDragState {
   originTimelineStartMs: TimeMs
   originSourceInMs: TimeMs
   originSourceOutMs: TimeMs
+  linkGroupId?: string
 }
 
 export type EditorDocumentSlice = {
