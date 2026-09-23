@@ -23,6 +23,8 @@ export interface ClipDragState {
   clipId: string
   mode: 'move' | 'trim-in' | 'trim-out'
   originClientX: number
+  originClientY: number
+  originTrackId: string
   originTimelineStartMs: TimeMs
   originSourceInMs: TimeMs
   originSourceOutMs: TimeMs

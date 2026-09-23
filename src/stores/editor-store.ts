@@ -44,7 +44,11 @@ interface EditorActions {
   unregisterMediaSource: (mediaSourceId: string) => boolean
   addClip: (mediaSourceId: string, timelineStartMs?: TimeMs) => boolean
   removeClip: (clipId: string) => boolean
-  moveClipTo: (clipId: string, timelineStartMs: TimeMs, trackId?: string) => boolean
+  moveClipTo: (
+    clipId: string,
+    timelineStartMs: TimeMs,
+    trackId?: string,
+  ) => boolean
   trimClipTo: (
     clipId: string,
     args: {

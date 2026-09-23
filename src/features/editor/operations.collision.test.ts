@@ -186,4 +186,70 @@ describe('moveClipOnTimeline collision lanes', () => {
     expect(m2VideoMoved.trackId).toBe(videoTracks[0]!.id)
     expect(m2AudioMoved.trackId).toBe(audio1.id)
   })
+
+  it('folds clips back to Video 1 / Audio 1 and prunes empty lanes', () => {
+    let document = placeTwoAvClips()
+    const video1 = document.tracks.find(
+      (track) => track.kind === 'video' && track.name === 'Video 1',
+    )!
+
+    const m2Video = document.clips.find(
+      (clip) =>
+        clip.mediaSourceId === 'm2' && clip.trackId === video1.id,
+    )!
+
+    const overlapped = moveClipOnTimeline({
+      document,
+      clipId: m2Video.id,
+      timelineStartMs: 500,
+    })
+    expect(overlapped.ok).toBe(true)
+    if (!overlapped.ok) return
+    document = overlapped.document
+    expect(
+      getSortedTracks(document).filter((track) => track.kind === 'video'),
+    ).toHaveLength(2)
+
+    const m2VideoLane = document.clips.find(
+      (clip) =>
+        clip.mediaSourceId === 'm2' &&
+        document.tracks.find((track) => track.id === clip.trackId)?.kind ===
+          'video',
+    )!
+
+    const cleared = moveClipOnTimeline({
+      document,
+      clipId: m2VideoLane.id,
+      timelineStartMs: 2000,
+    })
+    expect(cleared.ok).toBe(true)
+    if (!cleared.ok) return
+    document = cleared.document
+
+    const videoTracks = getSortedTracks(document).filter(
+      (track) => track.kind === 'video',
+    )
+    const audioTracks = getSortedTracks(document).filter(
+      (track) => track.kind === 'audio',
+    )
+    expect(videoTracks).toHaveLength(1)
+    expect(audioTracks).toHaveLength(1)
+
+    const m2VideoHome = document.clips.find(
+      (clip) =>
+        clip.mediaSourceId === 'm2' &&
+        document.tracks.find((track) => track.id === clip.trackId)?.kind ===
+          'video',
+    )!
+    const m2AudioHome = document.clips.find(
+      (clip) =>
+        clip.mediaSourceId === 'm2' &&
+        document.tracks.find((track) => track.id === clip.trackId)?.kind ===
+          'audio',
+    )!
+
+    expect(m2VideoHome.trackId).toBe(videoTracks[0]!.id)
+    expect(m2AudioHome.trackId).toBe(audioTracks[0]!.id)
+    expect(m2VideoHome.timelineStartMs).toBe(2000)
+  })
 })

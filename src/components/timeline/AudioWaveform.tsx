@@ -5,8 +5,8 @@ import {
 } from '@/lib/media/waveform'
 
 /** Cap drawing resolution so very wide (zoomed) clips stay responsive. */
-const MAX_CANVAS_WIDTH = 960
-const MAX_BARS = 180
+const MAX_CANVAS_WIDTH = 1400
+const MAX_SAMPLES = 420
 
 function cappedDrawWidth(widthPx: number): number {
   return Math.max(8, Math.min(MAX_CANVAS_WIDTH, Math.floor(widthPx) || 8))
@@ -35,8 +35,13 @@ export function AudioWaveform({
     const canvas = canvasRef.current
     if (!canvas) return
 
-    const barCount = Math.max(8, Math.min(MAX_BARS, Math.floor(drawWidth / 3)))
-    const height = 64
+    const sampleCount = Math.max(
+      24,
+      Math.min(MAX_SAMPLES, Math.floor(drawWidth / 1.5)),
+    )
+    const height = 72
+    const midY = height / 2
+    const amplitudeScale = height * 0.42
 
     canvas.width = drawWidth
     canvas.height = height
@@ -44,38 +49,66 @@ export function AudioWaveform({
     const context = canvas.getContext('2d')
     if (!context) return
 
-    context.clearRect(0, 0, drawWidth, height)
-    context.fillStyle = '#16352c'
-    context.fillRect(0, 0, drawWidth, height)
+    const paintBackground = () => {
+      context.clearRect(0, 0, drawWidth, height)
+      context.fillStyle = '#16352c'
+      context.fillRect(0, 0, drawWidth, height)
+    }
+
+    paintBackground()
 
     void getWaveformPeaks(mediaSourceId, src)
       .then((peaks) => {
         if (cancelled) return
-        const bars = samplePeakWindow(
+        const samples = samplePeakWindow(
           peaks,
           sourceInMs,
           sourceOutMs,
           mediaDurationMs,
-          barCount,
+          sampleCount,
         )
-        context.clearRect(0, 0, drawWidth, height)
-        context.fillStyle = '#16352c'
-        context.fillRect(0, 0, drawWidth, height)
-        context.fillStyle = 'rgba(110, 220, 170, 0.85)'
 
-        const midY = height / 2
-        const step = drawWidth / barCount
-        for (let index = 0; index < bars.length; index += 1) {
-          const amplitude = bars[index] ?? 0
-          const barHeight = Math.max(2, amplitude * (height * 0.82))
+        paintBackground()
+
+        // Soft center guide like Premiere / Resolve audio lanes.
+        context.strokeStyle = 'rgba(110, 220, 170, 0.18)'
+        context.lineWidth = 1
+        context.beginPath()
+        context.moveTo(0, midY)
+        context.lineTo(drawWidth, midY)
+        context.stroke()
+
+        if (samples.length === 0) return
+
+        const step = drawWidth / Math.max(1, samples.length - 1)
+
+        // Continuous mirrored envelope — filled waveform, not discrete bars.
+        context.beginPath()
+        context.moveTo(0, midY)
+
+        for (let index = 0; index < samples.length; index += 1) {
+          const amplitude = samples[index] ?? 0
+          const y = midY - Math.max(0.5, amplitude * amplitudeScale)
           const x = index * step
-          context.fillRect(
-            x,
-            midY - barHeight / 2,
-            Math.max(1, step * 0.7),
-            barHeight,
-          )
+          if (index === 0) context.lineTo(x, y)
+          else context.lineTo(x, y)
         }
+
+        for (let index = samples.length - 1; index >= 0; index -= 1) {
+          const amplitude = samples[index] ?? 0
+          const y = midY + Math.max(0.5, amplitude * amplitudeScale)
+          const x = index * step
+          context.lineTo(x, y)
+        }
+
+        context.closePath()
+        context.fillStyle = 'rgba(110, 220, 170, 0.55)'
+        context.fill()
+
+        context.strokeStyle = 'rgba(150, 235, 190, 0.9)'
+        context.lineWidth = 1
+        context.lineJoin = 'round'
+        context.stroke()
       })
       .catch(() => {
         // Keep the solid fallback fill already painted.

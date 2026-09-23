@@ -335,103 +335,126 @@ function rangesOverlap(
 }
 
 function trackIsFreeAt(args: {
-  document: ProjectDocument
+  tracks: Track[]
+  clips: Clip[]
   trackId: string
   startMs: TimeMs
   durationMs: TimeMs
-  ignoreClipIds: ReadonlySet<string>
 }): boolean {
-  return args.document.clips
-    .filter(
-      (candidate) =>
-        candidate.trackId === args.trackId &&
-        !args.ignoreClipIds.has(candidate.id),
-    )
+  return args.clips
+    .filter((candidate) => candidate.trackId === args.trackId)
     .every(
       (candidate) => !rangesOverlap(args.startMs, args.durationMs, candidate),
     )
 }
 
-/**
- * Prefer the clip's current lane; otherwise the first free lane of that kind.
- * Video lanes grow upward (lower order); audio lanes grow downward (higher order).
- */
-function resolveTrackWithoutOverlap(args: {
-  document: ProjectDocument
-  clip: Clip
-  kind: Track['kind']
-  startMs: TimeMs
-  ignoreClipIds: ReadonlySet<string>
-  preferredTrackId?: string
-}): { document: ProjectDocument; trackId: string } | { error: string } {
-  const durationMs = args.clip.sourceOutMs - args.clip.sourceInMs
-  const preferredId = args.preferredTrackId ?? args.clip.trackId
-
-  const isFree = (trackId: string) =>
-    trackIsFreeAt({
-      document: args.document,
-      trackId,
-      startMs: args.startMs,
-      durationMs,
-      ignoreClipIds: args.ignoreClipIds,
-    })
-
-  if (isFree(preferredId)) {
-    return { document: args.document, trackId: preferredId }
-  }
-
-  const open = args.document.tracks
-    .filter(
-      (track) =>
-        track.kind === args.kind &&
-        !track.locked &&
-        track.id !== preferredId,
+/** Video prefers home lane (highest order = V1); audio prefers lowest order (A1). */
+function sortTracksHomeFirst(tracks: Track[], kind: Track['kind']): Track[] {
+  return tracks
+    .filter((track) => track.kind === kind && !track.locked)
+    .sort((a, b) =>
+      kind === 'video' ? b.order - a.order : a.order - b.order,
     )
-    .sort((a, b) => a.order - b.order)
-    .find((track) => isFree(track.id))
+}
 
-  if (open) {
-    return { document: args.document, trackId: open.id }
-  }
+function nextTrackName(tracks: Track[], kind: Track['kind']): string {
+  const count = tracks.filter((track) => track.kind === kind).length
+  return `${kind === 'video' ? 'Video' : 'Audio'} ${count + 1}`
+}
 
-  const kindTracks = args.document.tracks.filter(
-    (track) => track.kind === args.kind,
-  )
+function createProvisionalTrack(
+  tracks: Track[],
+  kind: Track['kind'],
+): { tracks: Track[]; track: Track } {
+  const kindTracks = tracks.filter((track) => track.kind === kind)
   const orders = kindTracks.map((track) => track.order)
   const order =
-    args.kind === 'video'
+    kind === 'video'
       ? (orders.length > 0 ? Math.min(...orders) : 0) - 1
       : (orders.length > 0 ? Math.max(...orders) : 0) + 1
 
-  const created = createTrack({
-    document: args.document,
-    kind: args.kind,
+  const track: Track = {
+    id: createId('track'),
+    kind,
     order,
-    name: `${args.kind === 'video' ? 'Video' : 'Audio'} ${kindTracks.length + 1}`,
-  })
-  if (!created.ok) return { error: created.error }
+    name: nextTrackName(tracks, kind),
+    muted: false,
+    locked: false,
+  }
 
-  const newTrack = created.document.tracks[created.document.tracks.length - 1]
-  if (!newTrack) return { error: 'Failed to create track.' }
+  return { tracks: [...tracks, track], track }
+}
 
-  return { document: created.document, trackId: newTrack.id }
+/**
+ * Prefer an explicit drop target when free; otherwise the home-most free lane
+ * (so clips can return to Video 1 / Audio 1). Create a new lane only when needed.
+ */
+function resolveTrackWithoutOverlap(args: {
+  tracks: Track[]
+  occupiedClips: Clip[]
+  kind: Track['kind']
+  startMs: TimeMs
+  durationMs: TimeMs
+  preferredTrackId?: string
+  documentTrackIds: ReadonlySet<string>
+}): { tracks: Track[]; trackId: string } {
+  const isFree = (trackId: string) =>
+    trackIsFreeAt({
+      tracks: args.tracks,
+      clips: args.occupiedClips,
+      trackId,
+      startMs: args.startMs,
+      durationMs: args.durationMs,
+    })
+
+  if (args.preferredTrackId) {
+    const preferred = args.tracks.find(
+      (track) =>
+        track.id === args.preferredTrackId &&
+        track.kind === args.kind &&
+        !track.locked,
+    )
+    if (preferred && isFree(preferred.id)) {
+      return { tracks: args.tracks, trackId: preferred.id }
+    }
+  }
+
+  const homeFree = sortTracksHomeFirst(args.tracks, args.kind).find((track) =>
+    isFree(track.id),
+  )
+  if (homeFree) {
+    return { tracks: args.tracks, trackId: homeFree.id }
+  }
+
+  // Reuse a seeded provisional lane of this kind before minting a new id.
+  const spareProvisional = args.tracks.find(
+    (track) =>
+      track.kind === args.kind &&
+      !track.locked &&
+      !args.documentTrackIds.has(track.id) &&
+      isFree(track.id),
+  )
+  if (spareProvisional) {
+    return { tracks: args.tracks, trackId: spareProvisional.id }
+  }
+
+  const created = createProvisionalTrack(args.tracks, args.kind)
+  return { tracks: created.tracks, trackId: created.track.id }
 }
 
 function snapStartMsOnTrack(
-  document: ProjectDocument,
-  clip: Clip,
+  clips: Clip[],
   trackId: string,
+  clip: Clip,
   startMs: TimeMs,
-  ignoreClipIds: ReadonlySet<string>,
 ): TimeMs {
   const durationMs = clip.sourceOutMs - clip.sourceInMs
   const snapDistanceMs = 180
   let nearest = startMs
   let nearestDistance = snapDistanceMs + 1
 
-  for (const candidate of document.clips) {
+  for (const candidate of clips) {
     if (candidate.trackId !== trackId) continue
-    if (ignoreClipIds.has(candidate.id)) continue
     const candidateEndMs =
       candidate.timelineStartMs +
       (candidate.sourceOutMs - candidate.sourceInMs)
@@ -448,6 +471,213 @@ function snapStartMsOnTrack(
   }
 
   return nearest
+}
+
+export type ClipMovePlacement = {
+  clipId: string
+  trackId: string
+  timelineStartMs: TimeMs
+}
+
+export type ClipMovePlan = {
+  placements: ClipMovePlacement[]
+  tracks: Track[]
+}
+
+/**
+ * Preview/commit plan for moving a clip (and linked partners) with no overlaps.
+ * Video collision → free / new lane above; audio → free / new lane below.
+ * When a home lane is free again, placements fold back to Video 1 / Audio 1.
+ */
+export function planClipMove(args: {
+  document: ProjectDocument
+  clipId: string
+  timelineStartMs: TimeMs
+  /** Preferred lane for the primary clip (vertical drop target). */
+  trackId?: string
+  /** Reuse provisional tracks from a prior live-drag plan (stable ids). */
+  seedTracks?: Track[]
+}): ClipMovePlan | { error: string } {
+  const clip = getClipById(args.document, args.clipId)
+  if (!clip) {
+    return { error: 'Clip not found.' }
+  }
+
+  const linked = getLinkedClips(args.document, args.clipId)
+  // Linked AV partners always move together in time; trackId is only a
+  // preferred drop lane for the primary clip.
+  const movingLinkedGroup = linked.length > 1
+  const targets = (movingLinkedGroup ? linked : [clip])
+    .slice()
+    .sort((a, b) => {
+      const aKind = getTrackById(args.document, a.trackId)?.kind
+      const bKind = getTrackById(args.document, b.trackId)?.kind
+      if (aKind === bKind) return 0
+      if (aKind === 'video') return -1
+      if (bKind === 'video') return 1
+      return 0
+    })
+
+  const movingIds = new Set(targets.map((item) => item.id))
+  const deltaMs = Math.round(args.timelineStartMs) - clip.timelineStartMs
+  const documentTrackIds = new Set(args.document.tracks.map((track) => track.id))
+
+  let tracks = [...args.document.tracks]
+  if (args.seedTracks) {
+    for (const seeded of args.seedTracks) {
+      if (!tracks.some((track) => track.id === seeded.id)) {
+        tracks.push(seeded)
+      }
+    }
+  }
+
+  let occupiedClips = args.document.clips.filter(
+    (item) => !movingIds.has(item.id),
+  )
+  const placements: ClipMovePlacement[] = []
+
+  for (const target of targets) {
+    const targetTrack = getTrackById(args.document, target.trackId)
+    if (!targetTrack) {
+      return { error: 'Clip track not found.' }
+    }
+
+    let nextStartMs =
+      target.id === args.clipId
+        ? Math.max(0, Math.round(args.timelineStartMs))
+        : Math.max(0, target.timelineStartMs + deltaMs)
+
+    const preferredTrackId =
+      target.id === args.clipId ? args.trackId : undefined
+
+    if (!movingLinkedGroup && preferredTrackId) {
+      nextStartMs = snapStartMsOnTrack(
+        occupiedClips,
+        preferredTrackId,
+        target,
+        nextStartMs,
+      )
+    } else if (!movingLinkedGroup) {
+      const home = sortTracksHomeFirst(tracks, targetTrack.kind)[0]
+      if (home) {
+        nextStartMs = snapStartMsOnTrack(
+          occupiedClips,
+          home.id,
+          target,
+          nextStartMs,
+        )
+      }
+    }
+
+    const durationMs = target.sourceOutMs - target.sourceInMs
+    const resolved = resolveTrackWithoutOverlap({
+      tracks,
+      occupiedClips,
+      kind: targetTrack.kind,
+      startMs: nextStartMs,
+      durationMs,
+      preferredTrackId,
+      documentTrackIds,
+    })
+
+    tracks = resolved.tracks
+
+    if (
+      !movingLinkedGroup &&
+      preferredTrackId &&
+      resolved.trackId !== preferredTrackId
+    ) {
+      nextStartMs =
+        target.id === args.clipId
+          ? Math.max(0, Math.round(args.timelineStartMs))
+          : Math.max(0, target.timelineStartMs + deltaMs)
+    }
+
+    placements.push({
+      clipId: target.id,
+      trackId: resolved.trackId,
+      timelineStartMs: nextStartMs,
+    })
+
+    occupiedClips = [
+      ...occupiedClips,
+      {
+        ...target,
+        trackId: resolved.trackId,
+        timelineStartMs: nextStartMs,
+      },
+    ]
+  }
+
+  // Drop unused provisional lanes from the seed so empty preview rows collapse
+  // as soon as clips can sit on home tracks again.
+  const usedTrackIds = new Set(placements.map((placement) => placement.trackId))
+  for (const item of args.document.clips) {
+    if (!movingIds.has(item.id)) usedTrackIds.add(item.trackId)
+  }
+  tracks = tracks.filter(
+    (track) => documentTrackIds.has(track.id) || usedTrackIds.has(track.id),
+  )
+
+  return { placements, tracks }
+}
+
+/** Drop empty extra video/audio lanes after clips fold back home. */
+export function pruneEmptyTracks(document: ProjectDocument): ProjectDocument {
+  const used = new Set(document.clips.map((clip) => clip.trackId))
+  const videoTracks = document.tracks
+    .filter((track) => track.kind === 'video')
+    .sort((a, b) => b.order - a.order)
+  const audioTracks = document.tracks
+    .filter((track) => track.kind === 'audio')
+    .sort((a, b) => a.order - b.order)
+
+  const keep = new Set<string>()
+  const homeVideo = videoTracks[0]
+  const homeAudio = audioTracks[0]
+  if (homeVideo) keep.add(homeVideo.id)
+  if (homeAudio) keep.add(homeAudio.id)
+
+  for (const track of document.tracks) {
+    if (used.has(track.id)) keep.add(track.id)
+  }
+
+  const nextTracks = document.tracks.filter((track) => keep.has(track.id))
+  if (nextTracks.length === document.tracks.length) return document
+
+  return touchDocument({
+    ...document,
+    tracks: nextTracks,
+  })
+}
+
+export function applyClipMovePlan(
+  document: ProjectDocument,
+  plan: ClipMovePlan,
+): OperationResult {
+  let next = document
+
+  for (const track of plan.tracks) {
+    if (!next.tracks.some((item) => item.id === track.id)) {
+      next = touchDocument({
+        ...next,
+        tracks: [...next.tracks, track],
+      })
+    }
+  }
+
+  for (const placement of plan.placements) {
+    const result = moveClip({
+      document: next,
+      clipId: placement.clipId,
+      timelineStartMs: placement.timelineStartMs,
+      trackId: placement.trackId,
+    })
+    if (!result.ok) return result
+    next = result.document
+  }
+
+  return { ok: true, document: pruneEmptyTracks(next) }
 }
 
 export function moveClip(args: {
@@ -516,90 +746,11 @@ export function moveClipOnTimeline(args: {
   timelineStartMs: TimeMs
   trackId?: string
 }): OperationResult {
-  const clip = getClipById(args.document, args.clipId)
-  if (!clip) {
-    return { ok: false, error: 'Clip not found.' }
+  const plan = planClipMove(args)
+  if ('error' in plan) {
+    return { ok: false, error: plan.error }
   }
-
-  const linked = getLinkedClips(args.document, args.clipId)
-  const movingLinkedGroup = linked.length > 1 && args.trackId == null
-  const targets = (movingLinkedGroup ? linked : [clip])
-    .slice()
-    .sort((a, b) => {
-      const aKind = getTrackById(args.document, a.trackId)?.kind
-      const bKind = getTrackById(args.document, b.trackId)?.kind
-      if (aKind === bKind) return 0
-      if (aKind === 'video') return -1
-      if (bKind === 'video') return 1
-      return 0
-    })
-  const ignoreClipIds = new Set(targets.map((item) => item.id))
-  const deltaMs = Math.round(args.timelineStartMs) - clip.timelineStartMs
-
-  let document = args.document
-
-  for (const target of targets) {
-    const targetTrack = getTrackById(document, target.trackId)
-    if (!targetTrack) {
-      return { ok: false, error: 'Clip track not found.' }
-    }
-
-    let nextStartMs =
-      target.id === args.clipId
-        ? Math.max(0, Math.round(args.timelineStartMs))
-        : Math.max(0, target.timelineStartMs + deltaMs)
-
-    const preferredTrackId =
-      target.id === args.clipId && args.trackId
-        ? args.trackId
-        : target.trackId
-
-    if (!movingLinkedGroup) {
-      nextStartMs = snapStartMsOnTrack(
-        document,
-        target,
-        preferredTrackId,
-        nextStartMs,
-        ignoreClipIds,
-      )
-    }
-
-    const resolved = resolveTrackWithoutOverlap({
-      document,
-      clip: target,
-      kind: targetTrack.kind,
-      startMs: nextStartMs,
-      ignoreClipIds,
-      preferredTrackId,
-    })
-    if ('error' in resolved) {
-      return { ok: false, error: resolved.error }
-    }
-
-    document = resolved.document
-
-    // If the preferred lane was full, keep the requested start time on the
-    // newly resolved free lane (don't re-snap into another collision).
-    if (!movingLinkedGroup && resolved.trackId !== preferredTrackId) {
-      nextStartMs = Math.max(
-        0,
-        target.id === args.clipId
-          ? Math.round(args.timelineStartMs)
-          : target.timelineStartMs + deltaMs,
-      )
-    }
-
-    const result = moveClip({
-      document,
-      clipId: target.id,
-      timelineStartMs: nextStartMs,
-      trackId: resolved.trackId,
-    })
-    if (!result.ok) return result
-    document = result.document
-  }
-
-  return { ok: true, document }
+  return applyClipMovePlan(args.document, plan)
 }
 
 export function trimClip(args: {
