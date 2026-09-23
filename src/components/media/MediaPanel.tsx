@@ -1,8 +1,8 @@
 import { Film, Music2, Plus, Trash2 } from 'lucide-react'
 import { useRef } from 'react'
 import { importLocalMediaFile, MEDIA_ACCEPT } from '@/lib/media/import'
+import { getObjectUrl } from '@/lib/media/object-urls'
 import { useEditorStore } from '@/stores/editor-store'
-import { formatDurationShort } from '@/utils/time'
 
 export function MediaPanel() {
   const mediaSources = useEditorStore((state) => state.document.mediaSources)
@@ -40,8 +40,8 @@ export function MediaPanel() {
   }
 
   return (
-    <aside className="flex h-full min-h-0 w-[240px] shrink-0 flex-col border-r border-fb-border bg-fb-panel">
-      <div className="flex h-9 items-center justify-between border-b border-fb-border px-3">
+    <aside className="flex h-full min-h-0 w-[360px] shrink-0 flex-col border-r border-fb-border bg-fb-panel">
+      <div className="flex h-11 items-center justify-between px-3">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
           Media
         </h2>
@@ -49,7 +49,7 @@ export function MediaPanel() {
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={importStatus === 'importing'}
-          className="inline-flex h-6 items-center gap-1 rounded border border-fb-border bg-white px-2 text-[11px] font-medium text-fb-text hover:bg-fb-app disabled:opacity-50"
+          className="inline-flex h-7 items-center gap-1 rounded-md border border-white/10 bg-white/[0.07] px-2 text-[11px] font-medium text-fb-text hover:bg-white/[0.12] disabled:opacity-50"
         >
           <Plus size={12} strokeWidth={2} />
           Import
@@ -69,62 +69,61 @@ export function MediaPanel() {
         {mediaSources.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center">
             <Film size={20} className="text-fb-subtle" strokeWidth={1.5} />
-            <p className="text-[12px] font-medium text-fb-text">No media yet</p>
+            <p className="text-[12px] font-medium text-fb-text">Import your media</p>
             <p className="text-[11px] leading-relaxed text-fb-muted">
-              Import local video or audio files. Files stay in this browser
-              session and are not uploaded.
+              Drag files here, or use Import to add local video and audio.
             </p>
           </div>
         ) : (
-          <ul className="flex flex-col gap-1">
+          <ul className="grid grid-cols-2 gap-3">
             {mediaSources.map((source) => {
               const selected = source.id === selectedMediaSourceId
+              const objectUrl = getObjectUrl(source.id)
               return (
                 <li key={source.id}>
                   <div
-                    className={`group rounded border px-2 py-2 ${
+                    className={`group relative rounded-md border p-1 ${
                       selected
-                        ? 'border-fb-accent/40 bg-fb-accent-soft'
-                        : 'border-transparent hover:border-fb-border hover:bg-white'
+                        ? 'border-fb-accent/60 bg-fb-accent-soft'
+                        : 'border-transparent hover:border-fb-border hover:bg-white/[0.04]'
                     }`}
                   >
                     <button
                       type="button"
                       onClick={() => selectMediaSource(source.id)}
-                      className="flex w-full items-start gap-2 text-left"
+                      onDoubleClick={() => addClip(source.id)}
+                      title="Double-click to add to timeline"
+                      className="block w-full text-left"
                     >
-                      <span className="mt-0.5 text-fb-muted">
-                        {source.kind === 'video' ? (
-                          <Film size={14} strokeWidth={1.75} />
+                      <span className="relative block aspect-video overflow-hidden rounded-[5px] border border-white/[0.08] bg-[#181e22]">
+                        {source.kind === 'video' && objectUrl ? (
+                          <video
+                            src={objectUrl}
+                            className="h-full w-full object-cover"
+                            muted
+                            preload="metadata"
+                            aria-hidden
+                          />
                         ) : (
-                          <Music2 size={14} strokeWidth={1.75} />
+                          <span className="absolute inset-0 flex items-center justify-center text-fb-muted">
+                            {source.kind === 'video' ? (
+                              <Film size={22} strokeWidth={1.5} />
+                            ) : (
+                              <Music2 size={22} strokeWidth={1.5} />
+                            )}
+                          </span>
                         )}
                       </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[12px] font-medium text-fb-text">
+                      <span className="mt-1.5 block truncate px-0.5 text-[11px] font-medium text-fb-text">
                           {source.name}
-                        </span>
-                        <span className="mt-0.5 block text-[10px] text-fb-muted">
-                          {source.kind} · {formatDurationShort(source.durationMs)}
-                          {source.width && source.height
-                            ? ` · ${source.width}×${source.height}`
-                            : ''}
-                        </span>
                       </span>
                     </button>
-                    <div className="mt-1.5 flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
-                      <button
-                        type="button"
-                        onClick={() => addClip(source.id)}
-                        className="h-6 rounded border border-fb-border bg-white px-1.5 text-[10px] font-medium text-fb-text hover:bg-fb-app"
-                      >
-                        Add to timeline
-                      </button>
+                    <div className="absolute top-2 right-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
                       <button
                         type="button"
                         onClick={() => unregisterMediaSource(source.id)}
                         aria-label={`Remove ${source.name}`}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded text-fb-muted hover:bg-red-50 hover:text-fb-danger"
+                        className="inline-flex h-6 w-6 items-center justify-center rounded bg-black/45 text-fb-muted hover:bg-red-50 hover:text-fb-danger"
                       >
                         <Trash2 size={12} strokeWidth={1.75} />
                       </button>

@@ -1,26 +1,27 @@
+@import url('https://fonts.googleapis.com/css2?family=Onest:wght@100..900&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "IBM Plex Sans", "Helvetica Neue", sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-sans: "Onest", sans-serif;
+  --font-mono: "Onest", sans-serif;
 
-  --color-fb-app: #f3f3f4;
-  --color-fb-panel: #fafafa;
-  --color-fb-surface: #ffffff;
-  --color-fb-border: #e4e4e7;
-  --color-fb-border-strong: #d4d4d8;
-  --color-fb-text: #18181b;
-  --color-fb-muted: #71717a;
-  --color-fb-subtle: #a1a1aa;
-  --color-fb-accent: #2563eb;
-  --color-fb-accent-soft: #eff6ff;
-  --color-fb-danger: #dc2626;
-  --color-fb-video: #dbeafe;
-  --color-fb-video-border: #93c5fd;
-  --color-fb-audio: #dcfce7;
-  --color-fb-audio-border: #86efac;
-  --color-fb-ruler: #f4f4f5;
-  --color-fb-playhead: #ef4444;
+  --color-fb-app: #11181d;
+  --color-fb-panel: #151f26;
+  --color-fb-surface: #172127;
+  --color-fb-border: #273239;
+  --color-fb-border-strong: #4a555b;
+  --color-fb-text: #d3d7d8;
+  --color-fb-muted: #a3aaad;
+  --color-fb-subtle: #737e83;
+  --color-fb-accent: #3f82c7;
+  --color-fb-accent-soft: #1c3852;
+  --color-fb-danger: #e06666;
+  --color-fb-video: #1c4b78;
+  --color-fb-video-border: #2d74b9;
+  --color-fb-audio: #174c3d;
+  --color-fb-audio-border: #1e8a67;
+  --color-fb-ruler: #10171b;
+  --color-fb-playhead: #f4f4f4;
 }
 
 *,
@@ -36,12 +37,19 @@ body,
   margin: 0;
 }
 
+html {
+  font-size: 14px;
+}
+
 body {
   font-family: var(--font-sans);
   color: var(--color-fb-text);
-  background: var(--color-fb-app);
+  background:
+    radial-gradient(ellipse at 50% 0%, #1d2a31 0%, transparent 52%),
+    var(--color-fb-app);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  letter-spacing: 0.5px;
 }
 
 button,
@@ -61,10 +69,14 @@ textarea {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c4c4c8;
+  background: #3a3a40;
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: content-box;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-fb-accent) 38%, transparent);
 }
 
 ::-webkit-scrollbar-track {

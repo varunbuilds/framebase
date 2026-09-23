@@ -72,10 +72,10 @@ export function TopToolbar() {
       : 'Unsaved local changes'
 
   return (
-    <header className="flex h-11 shrink-0 items-center gap-3 border-b border-fb-border bg-fb-surface px-3">
+    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-fb-border bg-fb-panel px-4">
       <div className="flex items-center gap-2 pr-2">
         <div
-          className="flex h-6 w-6 items-center justify-center rounded-[5px] bg-fb-text text-[11px] font-semibold tracking-tight text-white"
+          className="flex h-6 w-6 items-center justify-center rounded-[6px] bg-white text-[11px] font-bold tracking-tight text-black"
           aria-hidden
         >
           F
@@ -107,7 +107,7 @@ export function TopToolbar() {
         <button
           type="button"
           onClick={beginEditingName}
-          className="h-7 rounded px-2 text-left text-[13px] font-medium text-fb-text hover:bg-fb-app"
+          className="h-7 rounded px-2 text-left text-[13px] font-medium text-fb-text hover:bg-white/[0.06]"
           title="Rename project"
         >
           {projectName}
@@ -121,7 +121,7 @@ export function TopToolbar() {
           disabled={!canUndo}
           aria-label="Undo"
           title="Undo (⌘Z)"
-          className="inline-flex h-7 w-7 items-center justify-center rounded text-fb-text disabled:cursor-not-allowed disabled:opacity-35 hover:enabled:bg-fb-app"
+          className="inline-flex h-7 w-7 items-center justify-center rounded text-white/75 disabled:cursor-not-allowed disabled:opacity-35 hover:enabled:bg-white/[0.06]"
         >
           <Undo2 size={15} strokeWidth={1.75} />
         </button>
@@ -131,7 +131,7 @@ export function TopToolbar() {
           disabled={!canRedo}
           aria-label="Redo"
           title="Redo (⇧⌘Z)"
-          className="inline-flex h-7 w-7 items-center justify-center rounded text-fb-text disabled:cursor-not-allowed disabled:opacity-35 hover:enabled:bg-fb-app"
+          className="inline-flex h-7 w-7 items-center justify-center rounded text-white/75 disabled:cursor-not-allowed disabled:opacity-35 hover:enabled:bg-white/[0.06]"
         >
           <Redo2 size={15} strokeWidth={1.75} />
         </button>
@@ -154,7 +154,7 @@ export function TopToolbar() {
         <button
           type="button"
           onClick={() => markSaved()}
-          className="h-7 rounded border border-fb-border bg-white px-2.5 text-[12px] font-medium text-fb-text hover:bg-fb-app"
+          className="h-7 rounded-md border border-fb-border bg-white/[0.06] px-2.5 text-[12px] font-medium text-fb-text hover:bg-white/[0.1]"
         >
           Save locally
         </button>
@@ -163,7 +163,7 @@ export function TopToolbar() {
           disabled
           title="Export is not implemented in this milestone"
           aria-label="Export (not implemented)"
-          className="inline-flex h-7 items-center gap-1.5 rounded border border-fb-border bg-fb-app px-2.5 text-[12px] font-medium text-fb-subtle"
+          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.04] px-2.5 text-[12px] font-medium text-fb-subtle"
         >
           <Download size={13} strokeWidth={1.75} />
           Export

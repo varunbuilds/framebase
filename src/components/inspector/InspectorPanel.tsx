@@ -48,7 +48,7 @@ function NumberField({
           if (!Number.isFinite(seconds)) return
           onCommit(Math.round(seconds * 1000))
         }}
-        className="h-7 rounded border border-fb-border bg-white px-2 font-mono text-[12px] text-fb-text"
+        className="h-7 rounded border border-fb-border bg-white/[0.06] px-2 font-mono text-[12px] text-fb-text"
       />
     </Field>
   )
@@ -73,8 +73,8 @@ export function InspectorPanel() {
   const durationMs = clip ? clip.sourceOutMs - clip.sourceInMs : 0
 
   return (
-    <aside className="flex h-full min-h-0 w-[260px] shrink-0 flex-col border-l border-fb-border bg-fb-panel">
-      <div className="flex h-9 items-center border-b border-fb-border px-3">
+    <aside className="flex h-full min-h-0 w-[255px] shrink-0 flex-col border-l border-fb-border bg-fb-panel">
+      <div className="flex h-11 items-center px-3">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
           Inspector
         </h2>
@@ -95,11 +95,11 @@ export function InspectorPanel() {
                 type="text"
                 value={clip.label ?? media.name}
                 onChange={(event) => updateSelectedClipLabel(event.target.value)}
-                className="h-7 rounded border border-fb-border bg-white px-2 text-[12px] text-fb-text"
+                className="h-7 rounded border border-fb-border bg-white/[0.06] px-2 text-[12px] text-fb-text"
               />
             </Field>
 
-            <div className="rounded border border-fb-border bg-white px-2.5 py-2 text-[11px] text-fb-muted">
+            <div className="rounded border border-fb-border bg-white/[0.035] px-2.5 py-2 text-[11px] text-fb-muted">
               <div className="flex justify-between gap-2">
                 <span>Source</span>
                 <span className="truncate text-fb-text">{media.name}</span>
@@ -143,7 +143,7 @@ export function InspectorPanel() {
               onCommit={(ms) => trimClipTo(clip.id, { sourceOutMs: ms })}
             />
 
-            <div className="rounded border border-fb-border bg-fb-app px-2.5 py-2 font-mono text-[11px] text-fb-muted">
+            <div className="rounded border border-fb-border bg-black/20 px-2.5 py-2 font-mono text-[11px] text-fb-muted">
               <div>In {formatTimecode(clip.sourceInMs)}</div>
               <div>Out {formatTimecode(clip.sourceOutMs)}</div>
               <div className="mt-1 text-fb-text">
@@ -154,7 +154,7 @@ export function InspectorPanel() {
             <button
               type="button"
               onClick={() => removeClip(clip.id)}
-              className="mt-1 h-7 rounded border border-red-200 bg-white text-[12px] font-medium text-fb-danger hover:bg-red-50"
+              className="mt-1 h-7 rounded border border-rose-400/20 bg-rose-400/[0.04] text-[12px] font-medium text-fb-danger hover:bg-rose-400/[0.1]"
             >
               Delete clip
             </button>

@@ -103,7 +103,7 @@ function TimelineClipBlock({
         isVideo
           ? 'border-fb-video-border bg-fb-video'
           : 'border-fb-audio-border bg-fb-audio'
-      } ${selected ? 'ring-2 ring-fb-accent ring-offset-1' : ''}`}
+      } ${selected ? 'ring-1 ring-fb-accent ring-offset-1 ring-offset-fb-surface' : ''}`}
       style={{ left, width }}
     >
       <button
@@ -143,11 +143,18 @@ function TimelineClipBlock({
 export function TimelinePanel() {
   const document = useEditorStore((state) => state.document)
   const playheadMs = useEditorStore((state) => state.ui.playheadMs)
+  const isPlaying = useEditorStore((state) => state.ui.isPlaying)
   const pixelsPerSecond = useEditorStore((state) => state.ui.pixelsPerSecond)
+  const timelineScrollLeft = useEditorStore(
+    (state) => state.ui.timelineScrollLeft,
+  )
   const selectedClipId = useEditorStore((state) => state.ui.selectedClipId)
   const clipDrag = useEditorStore((state) => state.clipDrag)
   const seekTo = useEditorStore((state) => state.seekTo)
   const setPixelsPerSecond = useEditorStore((state) => state.setPixelsPerSecond)
+  const setTimelineScrollLeft = useEditorStore(
+    (state) => state.setTimelineScrollLeft,
+  )
   const selectClip = useEditorStore((state) => state.selectClip)
   const setClipDrag = useEditorStore((state) => state.setClipDrag)
   const moveClipTo = useEditorStore((state) => state.moveClipTo)
@@ -156,11 +163,50 @@ export function TimelinePanel() {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const dragDeltaMsRef = useRef(0)
+  const isScrubbingRef = useRef(false)
+  const restoredScrollRef = useRef(false)
   const [dragDeltaMs, setDragDeltaMs] = useState(0)
 
   const tracks = getSortedTracks(document)
   const durationMs = getTimelineDurationMs(document)
   const contentWidth = Math.max(800, msToPx(durationMs, pixelsPerSecond) + 120)
+
+  const seekFromClientX = useCallback(
+    (clientX: number) => {
+      const viewport = scrollRef.current
+      if (!viewport) return
+      const bounds = viewport.getBoundingClientRect()
+      const x = clientX - bounds.left + viewport.scrollLeft
+      seekTo(clamp(pxToMs(x, pixelsPerSecond), 0, durationMs))
+    },
+    [durationMs, pixelsPerSecond, seekTo],
+  )
+
+  const zoomAtClientX = useCallback(
+    (clientX: number, direction: 1 | -1) => {
+      const viewport = scrollRef.current
+      if (!viewport) return
+      const bounds = viewport.getBoundingClientRect()
+      const cursorOffset = clientX - bounds.left
+      const timeAtCursorMs = pxToMs(
+        viewport.scrollLeft + cursorOffset,
+        pixelsPerSecond,
+      )
+      const nextPixelsPerSecond = clamp(
+        pixelsPerSecond + direction * 10,
+        20,
+        240,
+      )
+      if (nextPixelsPerSecond === pixelsPerSecond) return
+      setPixelsPerSecond(nextPixelsPerSecond)
+      requestAnimationFrame(() => {
+        const nextLeft =
+          msToPx(timeAtCursorMs, nextPixelsPerSecond) - cursorOffset
+        viewport.scrollLeft = Math.max(0, nextLeft)
+      })
+    },
+    [pixelsPerSecond, setPixelsPerSecond],
+  )
 
   const rulerMarks = useMemo(() => {
     const marks: Array<{ ms: number; major: boolean }> = []
@@ -253,6 +299,45 @@ export function TimelinePanel() {
   }, [clipDrag, commitDrag, pixelsPerSecond])
 
   useEffect(() => {
+    const onMove = (event: PointerEvent) => {
+      if (isScrubbingRef.current) seekFromClientX(event.clientX)
+    }
+    const onUp = () => {
+      isScrubbingRef.current = false
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [seekFromClientX])
+
+  useEffect(() => {
+    const viewport = scrollRef.current
+    if (!viewport || restoredScrollRef.current) return
+    viewport.scrollLeft = timelineScrollLeft
+    restoredScrollRef.current = true
+  }, [timelineScrollLeft])
+
+  useEffect(() => {
+    if (!isPlaying) return
+    const viewport = scrollRef.current
+    if (!viewport) return
+    const playheadX = msToPx(playheadMs, pixelsPerSecond)
+    const inset = 80
+    if (
+      playheadX < viewport.scrollLeft + inset ||
+      playheadX > viewport.scrollLeft + viewport.clientWidth - inset
+    ) {
+      viewport.scrollTo({
+        left: Math.max(0, playheadX - viewport.clientWidth / 2),
+        behavior: 'auto',
+      })
+    }
+  }, [isPlaying, pixelsPerSecond, playheadMs])
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Backspace' && event.key !== 'Delete') return
       const target = event.target as HTMLElement | null
@@ -276,8 +361,8 @@ export function TimelinePanel() {
   const playheadLeft = msToPx(playheadMs, pixelsPerSecond)
 
   return (
-    <section className="flex h-[240px] shrink-0 flex-col border-t border-fb-border bg-fb-surface">
-      <div className="flex h-9 items-center gap-2 border-b border-fb-border px-3">
+    <section className="flex h-[260px] w-full min-w-0 shrink-0 select-none flex-col border-t border-fb-border bg-fb-surface">
+      <div className="flex h-10 items-center gap-2 border-b border-fb-border bg-fb-panel px-3">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
           Timeline
         </h2>
@@ -286,7 +371,7 @@ export function TimelinePanel() {
             type="button"
             aria-label="Zoom out"
             onClick={() => setPixelsPerSecond(pixelsPerSecond - 20)}
-            className="inline-flex h-6 w-6 items-center justify-center rounded text-fb-text hover:bg-fb-app"
+            className="inline-flex h-6 w-6 items-center justify-center rounded text-white/70 hover:bg-white/[0.08]"
           >
             <ZoomOut size={14} strokeWidth={1.75} />
           </button>
@@ -297,7 +382,7 @@ export function TimelinePanel() {
             type="button"
             aria-label="Zoom in"
             onClick={() => setPixelsPerSecond(pixelsPerSecond + 20)}
-            className="inline-flex h-6 w-6 items-center justify-center rounded text-fb-text hover:bg-fb-app"
+            className="inline-flex h-6 w-6 items-center justify-center rounded text-white/70 hover:bg-white/[0.08]"
           >
             <ZoomIn size={14} strokeWidth={1.75} />
           </button>
@@ -307,7 +392,7 @@ export function TimelinePanel() {
         </span>
       </div>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1">
         <div
           className="shrink-0 border-r border-fb-border bg-fb-panel"
           style={{ width: LABEL_WIDTH }}
@@ -331,21 +416,21 @@ export function TimelinePanel() {
           ref={scrollRef}
           className="relative min-w-0 flex-1 overflow-auto"
           onClick={() => selectClip(null)}
+          onScroll={(event) => setTimelineScrollLeft(event.currentTarget.scrollLeft)}
+          onWheel={(event) => {
+            event.preventDefault()
+            zoomAtClientX(event.clientX, event.deltaY < 0 ? 1 : -1)
+          }}
         >
-          <div style={{ width: contentWidth, minHeight: '100%' }}>
+          <div style={{ width: contentWidth, minWidth: '100%', minHeight: '100%' }}>
             <div
               className="relative border-b border-fb-border bg-fb-ruler"
               style={{ height: RULER_HEIGHT }}
               onPointerDown={(event) => {
+                event.preventDefault()
                 event.stopPropagation()
-                const bounds = event.currentTarget.getBoundingClientRect()
-                const x =
-                  event.clientX -
-                  bounds.left +
-                  (scrollRef.current?.scrollLeft ?? 0)
-                // Single seek on press — no pointer-move scrubbing, to avoid
-                // reloading media / cascading seeks during drag.
-                seekTo(clamp(pxToMs(x, pixelsPerSecond), 0, durationMs))
+                isScrubbingRef.current = true
+                seekFromClientX(event.clientX)
               }}
             >
               {rulerMarks.map((mark) => (
@@ -375,6 +460,12 @@ export function TimelinePanel() {
                 key={track.id}
                 className="relative border-b border-fb-border bg-fb-surface"
                 style={{ height: TRACK_HEIGHT }}
+                onPointerDown={(event) => {
+                  if (event.target !== event.currentTarget) return
+                  event.preventDefault()
+                  isScrubbingRef.current = true
+                  seekFromClientX(event.clientX)
+                }}
               >
                 {document.clips
                   .filter((clip) => clip.trackId === track.id)
@@ -419,11 +510,11 @@ export function TimelinePanel() {
             ))}
 
             <div
-              className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-fb-playhead"
+              className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-fb-playhead/80"
               style={{ left: playheadLeft }}
               aria-hidden
             >
-              <div className="absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-sm bg-fb-playhead" />
+              <div className="absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-fb-playhead shadow-[0_0_8px_rgba(255,255,255,0.45)]" />
             </div>
           </div>
         </div>
