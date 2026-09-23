@@ -1,137 +1,119 @@
-import { Pause, Play } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Pause, Play, SkipBack } from 'lucide-react'
+import { useMemo, useRef } from 'react'
+import {
+  getPlaybackEndMs,
+  resolvePlaybackAt,
+  resolvePlaybackTrack,
+} from '@/features/editor/playback'
+import { useTimelinePlayback } from '@/features/editor/use-timeline-playback'
 import { getMediaSourceById } from '@/features/editor/project'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { useEditorStore } from '@/stores/editor-store'
-import { formatTimecode, msToSeconds, secondsToMs } from '@/utils/time'
+import { formatTimecode } from '@/utils/time'
 
 export function PreviewPanel() {
   const document = useEditorStore((state) => state.document)
-  const selectedClipId = useEditorStore((state) => state.ui.selectedClipId)
+  const playheadMs = useEditorStore((state) => state.ui.playheadMs)
   const isPlaying = useEditorStore((state) => state.ui.isPlaying)
-  const setIsPlaying = useEditorStore((state) => state.setIsPlaying)
-  const setPlayheadMs = useEditorStore((state) => state.setPlayheadMs)
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const audioRef = useRef<HTMLAudioElement>(null)
-  const [previewTimeMs, setPreviewTimeMs] = useState(0)
+  const playbackError = useEditorStore((state) => state.ui.playbackError)
+  const togglePlayback = useEditorStore((state) => state.togglePlayback)
+  const restartPlayback = useEditorStore((state) => state.restartPlayback)
 
-  const selectedClip = useMemo(
-    () => document.clips.find((clip) => clip.id === selectedClipId) ?? null,
-    [document.clips, selectedClipId],
+  const mediaRef = useRef<HTMLVideoElement>(null)
+  useTimelinePlayback(mediaRef)
+
+  const playbackTrack = useMemo(
+    () => resolvePlaybackTrack(document),
+    [document],
   )
+  const timelineDurationMs = getPlaybackEndMs(document)
+  const resolution = resolvePlaybackAt(document, playheadMs)
 
-  const mediaSource = selectedClip
-    ? getMediaSourceById(document, selectedClip.mediaSourceId)
-    : null
+  const activeMedia =
+    resolution.status === 'clip'
+      ? getMediaSourceById(document, resolution.mediaSourceId)
+      : null
+  const objectUrl =
+    resolution.status === 'clip'
+      ? getObjectUrl(resolution.mediaSourceId)
+      : undefined
 
-  const objectUrl = mediaSource ? getObjectUrl(mediaSource.id) : undefined
-  const clipDurationMs = selectedClip
-    ? selectedClip.sourceOutMs - selectedClip.sourceInMs
-    : 0
+  const showMedia =
+    resolution.status === 'clip' && Boolean(objectUrl) && Boolean(activeMedia)
+  const isGap =
+    resolution.status === 'gap' ||
+    resolution.status === 'ended' ||
+    resolution.status === 'empty' ||
+    (resolution.status === 'clip' && !objectUrl)
 
-  useEffect(() => {
-    const media =
-      mediaSource?.kind === 'audio' ? audioRef.current : videoRef.current
-    if (!media || !selectedClip || !objectUrl) return
-
-    const onTimeUpdate = () => {
-      const sourceTimeMs = secondsToMs(media.currentTime)
-      const relativeMs = Math.max(0, sourceTimeMs - selectedClip.sourceInMs)
-      setPreviewTimeMs(relativeMs)
-      setPlayheadMs(selectedClip.timelineStartMs + relativeMs)
-
-      if (sourceTimeMs >= selectedClip.sourceOutMs - 30) {
-        media.pause()
-        setIsPlaying(false)
-        media.currentTime = msToSeconds(selectedClip.sourceInMs)
-        setPreviewTimeMs(0)
-      }
-    }
-
-    const onEnded = () => setIsPlaying(false)
-
-    media.addEventListener('timeupdate', onTimeUpdate)
-    media.addEventListener('ended', onEnded)
-    return () => {
-      media.removeEventListener('timeupdate', onTimeUpdate)
-      media.removeEventListener('ended', onEnded)
-    }
-  }, [mediaSource?.kind, objectUrl, selectedClip, setIsPlaying, setPlayheadMs])
-
-  useEffect(() => {
-    const media =
-      mediaSource?.kind === 'audio' ? audioRef.current : videoRef.current
-    if (!media || !selectedClip) return
-
-    media.currentTime = msToSeconds(selectedClip.sourceInMs)
-    setPreviewTimeMs(0)
-    setIsPlaying(false)
-  }, [selectedClip?.id, mediaSource?.kind, selectedClip, setIsPlaying])
-
-  useEffect(() => {
-    const media =
-      mediaSource?.kind === 'audio' ? audioRef.current : videoRef.current
-    if (!media) return
-
-    if (isPlaying) {
-      void media.play().catch(() => setIsPlaying(false))
-    } else {
-      media.pause()
-    }
-  }, [isPlaying, mediaSource?.kind, setIsPlaying])
+  const statusLabel = (() => {
+    if (playbackError) return playbackError
+    if (!playbackTrack) return 'No playback track'
+    if (timelineDurationMs <= 0) return 'Timeline is empty'
+    if (resolution.status === 'gap') return 'Gap'
+    if (resolution.status === 'ended') return 'End of timeline'
+    if (resolution.status === 'clip' && activeMedia) return activeMedia.name
+    if (resolution.status === 'clip' && !objectUrl) return 'Media unavailable'
+    return playbackTrack.name
+  })()
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-fb-app">
-      <div className="flex h-9 items-center border-b border-fb-border bg-fb-panel px-3">
+      <div className="flex h-9 items-center justify-between gap-2 border-b border-fb-border bg-fb-panel px-3">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
           Preview
         </h2>
-      </div>
-
-      <div className="flex min-h-0 flex-1 items-center justify-center p-4">
-        {!selectedClip || !mediaSource || !objectUrl ? (
-          <div className="flex max-w-sm flex-col items-center gap-2 text-center">
-            <div className="flex h-28 w-48 items-center justify-center rounded border border-dashed border-fb-border-strong bg-fb-panel">
-              <span className="text-[12px] text-fb-subtle">No clip selected</span>
-            </div>
-            <p className="text-[12px] text-fb-muted">
-              Select a clip on the timeline or add media to preview playback.
-            </p>
-          </div>
-        ) : mediaSource.kind === 'video' ? (
-          <div className="flex max-h-full max-w-full flex-col items-center gap-3">
-            <video
-              ref={videoRef}
-              key={objectUrl}
-              src={objectUrl}
-              className="max-h-[min(420px,100%)] max-w-full bg-black object-contain shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
-              playsInline
-              preload="metadata"
-              aria-label={`Preview ${mediaSource.name}`}
-            />
-          </div>
-        ) : (
-          <div className="flex w-full max-w-md flex-col items-center gap-4 rounded border border-fb-border bg-fb-panel px-6 py-8">
-            <p className="text-[13px] font-medium text-fb-text">{mediaSource.name}</p>
-            <p className="text-[11px] text-fb-muted">Audio clip</p>
-            <audio
-              ref={audioRef}
-              key={objectUrl}
-              src={objectUrl}
-              preload="metadata"
-              className="w-full"
-              aria-label={`Preview ${mediaSource.name}`}
-            />
-          </div>
+        {playbackTrack && (
+          <p className="truncate text-[10px] text-fb-subtle">
+            Playing track: {playbackTrack.name}
+            <span className="text-fb-subtle"> · single-track</span>
+          </p>
         )}
       </div>
 
-      <div className="flex h-11 items-center gap-3 border-t border-fb-border bg-fb-surface px-3">
+      <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+        <div className="relative flex max-h-full w-full max-w-3xl items-center justify-center">
+          <div className="relative aspect-video w-full max-h-[min(420px,100%)] overflow-hidden bg-black shadow-[0_1px_2px_rgba(0,0,0,0.08)]">
+            <video
+              ref={mediaRef}
+              className={`h-full w-full object-contain ${showMedia ? 'opacity-100' : 'opacity-0'}`}
+              playsInline
+              preload="auto"
+              aria-label="Timeline preview"
+            />
+
+            {isGap && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black">
+                <span className="text-[12px] text-zinc-500">
+                  {timelineDurationMs <= 0
+                    ? 'Add clips to the active video track'
+                    : resolution.status === 'ended'
+                      ? 'End of timeline'
+                      : 'Gap'}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex h-11 items-center gap-2 border-t border-fb-border bg-fb-surface px-3">
         <button
           type="button"
-          onClick={() => setIsPlaying(!isPlaying)}
-          disabled={!selectedClip || !objectUrl}
+          onClick={() => restartPlayback()}
+          disabled={timelineDurationMs <= 0}
+          aria-label="Restart from beginning"
+          title="Restart"
+          className="inline-flex h-7 w-7 items-center justify-center rounded border border-fb-border bg-white text-fb-text disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-fb-app"
+        >
+          <SkipBack size={14} strokeWidth={1.75} />
+        </button>
+        <button
+          type="button"
+          onClick={() => togglePlayback()}
+          disabled={timelineDurationMs <= 0 && !isPlaying}
           aria-label={isPlaying ? 'Pause' : 'Play'}
+          title={isPlaying ? 'Pause' : 'Play'}
           className="inline-flex h-7 w-7 items-center justify-center rounded border border-fb-border bg-white text-fb-text disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-fb-app"
         >
           {isPlaying ? (
@@ -141,15 +123,18 @@ export function PreviewPanel() {
           )}
         </button>
         <div className="font-mono text-[12px] tabular-nums text-fb-text">
-          {formatTimecode(previewTimeMs)}
+          {formatTimecode(playheadMs)}
           <span className="text-fb-subtle"> / </span>
-          {formatTimecode(clipDurationMs)}
+          {formatTimecode(timelineDurationMs)}
         </div>
-        {selectedClip && mediaSource && (
-          <p className="ml-auto truncate text-[11px] text-fb-muted">
-            {mediaSource.name}
-          </p>
-        )}
+        <p
+          className={`ml-auto truncate text-[11px] ${
+            playbackError ? 'text-fb-danger' : 'text-fb-muted'
+          }`}
+          role={playbackError ? 'alert' : undefined}
+        >
+          {statusLabel}
+        </p>
       </div>
     </section>
   )

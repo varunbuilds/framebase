@@ -5,10 +5,13 @@ export interface EditorUiState {
   selectedMediaSourceId: string | null
   playheadMs: TimeMs
   isPlaying: boolean
+  /** Bumped on explicit seeks so the playback loop adopts the new playhead. */
+  seekVersion: number
   pixelsPerSecond: number
   timelineScrollLeft: number
   importError: string | null
   importStatus: 'idle' | 'importing'
+  playbackError: string | null
   /** Local-only save indicator — not remote sync. */
   saveStatus: 'unsaved' | 'saved'
   lastSavedAt: string | null

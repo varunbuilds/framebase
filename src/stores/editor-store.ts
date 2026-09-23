@@ -11,6 +11,7 @@ import {
   trimClip,
   updateClipLabel,
 } from '@/features/editor/operations'
+import { getPlaybackEndMs } from '@/features/editor/playback'
 import { createEmptyProject } from '@/features/editor/project'
 import { revokeObjectUrl } from '@/lib/media/object-urls'
 import type { ClipDragState, EditorUiState } from '@/types/editor'
@@ -23,7 +24,13 @@ interface EditorActions {
   selectClip: (clipId: string | null) => void
   selectMediaSource: (mediaSourceId: string | null) => void
   setPlayheadMs: (ms: TimeMs) => void
+  seekTo: (ms: TimeMs) => void
+  play: () => void
+  pause: () => void
+  togglePlayback: () => void
+  restartPlayback: () => void
   setIsPlaying: (playing: boolean) => void
+  setPlaybackError: (error: string | null) => void
   setPixelsPerSecond: (pps: number) => void
   setTimelineScrollLeft: (left: number) => void
   setImportError: (error: string | null) => void
@@ -56,10 +63,12 @@ const initialUi: EditorUiState = {
   selectedMediaSourceId: null,
   playheadMs: 0,
   isPlaying: false,
+  seekVersion: 0,
   pixelsPerSecond: 80,
   timelineScrollLeft: 0,
   importError: null,
   importStatus: 'idle',
+  playbackError: null,
   saveStatus: 'unsaved',
   lastSavedAt: null,
 }
@@ -97,7 +106,6 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
       ui: {
         ...get().ui,
         selectedClipId: clipId,
-        isPlaying: false,
       },
     })
   },
@@ -112,14 +120,99 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
   },
 
   setPlayheadMs: (ms) => {
+    const endMs = getPlaybackEndMs(get().document)
+    const rounded = Math.max(0, Math.round(ms))
+    const next = endMs > 0 ? Math.min(rounded, endMs) : rounded
     set({
-      ui: { ...get().ui, playheadMs: Math.max(0, Math.round(ms)) },
+      ui: { ...get().ui, playheadMs: next },
+    })
+  },
+
+  seekTo: (ms) => {
+    const endMs = getPlaybackEndMs(get().document)
+    const rounded = Math.max(0, Math.round(ms))
+    const next = endMs > 0 ? Math.min(rounded, endMs) : rounded
+    set({
+      ui: {
+        ...get().ui,
+        playheadMs: next,
+        seekVersion: get().ui.seekVersion + 1,
+        playbackError: null,
+      },
+    })
+  },
+
+  play: () => {
+    const document = get().document
+    const endMs = getPlaybackEndMs(document)
+    if (endMs <= 0) {
+      set({
+        ui: {
+          ...get().ui,
+          isPlaying: false,
+          playbackError: 'Add a clip to the active track to play the timeline.',
+        },
+      })
+      return
+    }
+
+    let playheadMs = get().ui.playheadMs
+    let seekVersion = get().ui.seekVersion
+    if (playheadMs >= endMs) {
+      playheadMs = 0
+      seekVersion += 1
+    }
+
+    set({
+      ui: {
+        ...get().ui,
+        playheadMs,
+        seekVersion,
+        isPlaying: true,
+        playbackError: null,
+      },
+    })
+  },
+
+  pause: () => {
+    set({
+      ui: { ...get().ui, isPlaying: false },
+    })
+  },
+
+  togglePlayback: () => {
+    if (get().ui.isPlaying) {
+      get().pause()
+    } else {
+      get().play()
+    }
+  },
+
+  restartPlayback: () => {
+    set({
+      ui: {
+        ...get().ui,
+        playheadMs: 0,
+        seekVersion: get().ui.seekVersion + 1,
+        isPlaying: true,
+        playbackError: null,
+      },
     })
   },
 
   setIsPlaying: (playing) => {
     set({
       ui: { ...get().ui, isPlaying: playing },
+    })
+  },
+
+  setPlaybackError: (error) => {
+    set({
+      ui: {
+        ...get().ui,
+        playbackError: error,
+        isPlaying: error ? false : get().ui.isPlaying,
+      },
     })
   },
 

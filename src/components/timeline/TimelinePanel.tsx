@@ -146,7 +146,7 @@ export function TimelinePanel() {
   const pixelsPerSecond = useEditorStore((state) => state.ui.pixelsPerSecond)
   const selectedClipId = useEditorStore((state) => state.ui.selectedClipId)
   const clipDrag = useEditorStore((state) => state.clipDrag)
-  const setPlayheadMs = useEditorStore((state) => state.setPlayheadMs)
+  const seekTo = useEditorStore((state) => state.seekTo)
   const setPixelsPerSecond = useEditorStore((state) => state.setPixelsPerSecond)
   const selectClip = useEditorStore((state) => state.selectClip)
   const setClipDrag = useEditorStore((state) => state.setClipDrag)
@@ -337,12 +337,15 @@ export function TimelinePanel() {
               className="relative border-b border-fb-border bg-fb-ruler"
               style={{ height: RULER_HEIGHT }}
               onPointerDown={(event) => {
+                event.stopPropagation()
                 const bounds = event.currentTarget.getBoundingClientRect()
                 const x =
                   event.clientX -
                   bounds.left +
                   (scrollRef.current?.scrollLeft ?? 0)
-                setPlayheadMs(clamp(pxToMs(x, pixelsPerSecond), 0, durationMs))
+                // Single seek on press — no pointer-move scrubbing, to avoid
+                // reloading media / cascading seeks during drag.
+                seekTo(clamp(pxToMs(x, pixelsPerSecond), 0, durationMs))
               }}
             >
               {rulerMarks.map((mark) => (
