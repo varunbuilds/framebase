@@ -64,7 +64,7 @@ function trackIdAtClientY(args: {
   tracks: Track[]
   kind?: Track['kind']
 }): string | undefined {
-  const y = args.clientY - args.bodyTop + args.scrollTop
+  const y = args.clientY - args.bodyTop + args.scrollTop - RULER_HEIGHT
   if (args.tracks.length === 0) return undefined
 
   if (y < 0) {
@@ -159,7 +159,7 @@ function VideoFilmstrip({
   }
 
   return (
-    <div className="pointer-events-none flex h-full w-full overflow-hidden" aria-hidden>
+    <div className="pointer-events-none flex h-full w-full overflow-clip" aria-hidden>
       {frames.map((frame, index) => (
         <img
           key={`${index}-${frame.slice(-16)}`}
@@ -268,7 +268,7 @@ function TimelineClipBlock({
         onSelect(event.metaKey || event.ctrlKey)
         onPointerDownMove(event.clientX, event.clientY)
       }}
-      className={`absolute top-1.5 z-0 flex h-[calc(100%-12px)] flex-col overflow-hidden rounded-md border-2 ${
+      className={`absolute top-1.5 z-0 flex h-[calc(100%-12px)] flex-col overflow-clip rounded-md border-2 ${
         isMoving ? 'cursor-grabbing' : 'cursor-default'
       } ${isVideo ? 'bg-[#151c22]' : 'bg-[#13241f]'} ${
         selected
@@ -288,7 +288,7 @@ function TimelineClipBlock({
       </div>
 
       <div
-        className={`relative min-h-0 flex-1 overflow-hidden ${
+        className={`relative min-h-0 flex-1 overflow-clip ${
           isVideo ? 'bg-[#1a2228]' : 'bg-[#16352c]'
         }`}
       >
@@ -367,13 +367,12 @@ export function TimelinePanel() {
     (state) => state.unlinkSelectedClips,
   )
 
-  /** Single scroller for both axes; track labels are sticky-left inside. */
+  /** Single scroller for both axes; ruler sticks to top, labels stick to left. */
   const bodyScrollRef = useRef<HTMLDivElement>(null)
-  const rulerScrollRef = useRef<HTMLDivElement>(null)
   const tracksContentRef = useRef<HTMLDivElement>(null)
   const dragDeltaMsRef = useRef(0)
   const dragPreferredTrackIdRef = useRef<string | undefined>(undefined)
-  const isScrubbingRef = useRef<'body' | 'ruler' | null>(null)
+  const isScrubbingRef = useRef(false)
   const panRef = useRef<{
     originClientX: number
     originClientY: number
@@ -383,7 +382,6 @@ export function TimelinePanel() {
     moved: boolean
   } | null>(null)
   const restoredScrollRef = useRef(false)
-  const syncingHorizontalScrollRef = useRef(false)
   const [dragDeltaMs, setDragDeltaMs] = useState(0)
   const [dragPreferredTrackId, setDragPreferredTrackId] = useState<
     string | undefined
@@ -458,17 +456,7 @@ export function TimelinePanel() {
   displayTracksRef.current = displayTracks
 
   const seekFromClientX = useCallback(
-    (clientX: number, source: 'body' | 'ruler' = 'body') => {
-      if (source === 'ruler') {
-        const ruler = rulerScrollRef.current
-        if (!ruler) return
-        const bounds = ruler.getBoundingClientRect()
-        const x =
-          clientX - bounds.left + ruler.scrollLeft - TIMELINE_X_INSET
-        seekTo(clamp(pxToMs(x, pixelsPerSecond), 0, durationMs))
-        return
-      }
-
+    (clientX: number) => {
       const viewport = bodyScrollRef.current
       if (!viewport) return
       const bounds = viewport.getBoundingClientRect()
@@ -507,34 +495,9 @@ export function TimelinePanel() {
           LABEL_WIDTH +
           TIMELINE_X_INSET
         viewport.scrollLeft = Math.max(0, nextLeft)
-        const ruler = rulerScrollRef.current
-        if (ruler) ruler.scrollLeft = viewport.scrollLeft
       })
     },
     [pixelsPerSecond, setPixelsPerSecond],
-  )
-
-  const syncHorizontalScroll = useCallback(
-    (scrollLeft: number, source: 'body' | 'ruler') => {
-      if (syncingHorizontalScrollRef.current) return
-      syncingHorizontalScrollRef.current = true
-      if (source === 'body') {
-        const ruler = rulerScrollRef.current
-        if (ruler && ruler.scrollLeft !== scrollLeft) {
-          ruler.scrollLeft = scrollLeft
-        }
-      } else {
-        const body = bodyScrollRef.current
-        if (body && body.scrollLeft !== scrollLeft) {
-          body.scrollLeft = scrollLeft
-        }
-      }
-      syncingHorizontalScrollRef.current = false
-      if (useEditorStore.getState().ui.timelineScrollLeft !== scrollLeft) {
-        setTimelineScrollLeft(scrollLeft)
-      }
-    },
-    [setTimelineScrollLeft],
   )
 
   useEffect(() => {
@@ -672,7 +635,7 @@ export function TimelinePanel() {
   useEffect(() => {
     const onMove = (event: PointerEvent) => {
       if (isScrubbingRef.current) {
-        seekFromClientX(event.clientX, isScrubbingRef.current)
+        seekFromClientX(event.clientX)
         return
       }
 
@@ -688,21 +651,23 @@ export function TimelinePanel() {
       }
       if (!pan.moved) return
 
-      body.scrollLeft = Math.max(0, pan.originScrollLeft - dx)
-      body.scrollTop = Math.max(0, pan.originScrollTop - dy)
-      syncHorizontalScroll(body.scrollLeft, 'body')
+      const maxScrollLeft = Math.max(0, body.scrollWidth - body.clientWidth)
+      const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight)
+      body.scrollLeft = clamp(pan.originScrollLeft - dx, 0, maxScrollLeft)
+      body.scrollTop = clamp(pan.originScrollTop - dy, 0, maxScrollTop)
+      setTimelineScrollLeft(body.scrollLeft)
     }
 
     const onUp = () => {
       if (isScrubbingRef.current) {
-        isScrubbingRef.current = null
+        isScrubbingRef.current = false
         return
       }
 
       const pan = panRef.current
       if (!pan) return
       if (!pan.moved) {
-        seekFromClientX(pan.seekClientX, 'body')
+        seekFromClientX(pan.seekClientX)
       } else {
         suppressClickRef.current = true
       }
@@ -716,7 +681,7 @@ export function TimelinePanel() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
-  }, [seekFromClientX, syncHorizontalScroll])
+  }, [seekFromClientX, setTimelineScrollLeft])
 
   const isClipMoving = clipDrag?.mode === 'move'
   useEffect(() => {
@@ -733,8 +698,6 @@ export function TimelinePanel() {
     const viewport = bodyScrollRef.current
     if (!viewport || restoredScrollRef.current) return
     viewport.scrollLeft = timelineScrollLeft
-    const ruler = rulerScrollRef.current
-    if (ruler) ruler.scrollLeft = timelineScrollLeft
     restoredScrollRef.current = true
   }, [timelineScrollLeft])
 
@@ -767,8 +730,6 @@ export function TimelinePanel() {
         ),
         behavior: 'auto',
       })
-      const ruler = rulerScrollRef.current
-      if (ruler) ruler.scrollLeft = viewport.scrollLeft
     }
   }, [isPlaying, pixelsPerSecond, playheadMs])
 
@@ -923,223 +884,196 @@ export function TimelinePanel() {
         </div>
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div
+        ref={bodyScrollRef}
+        className={`relative min-h-0 min-w-0 flex-1 overflow-auto overscroll-none ${
+          isHandDragging || isClipMoving ? 'cursor-grabbing' : 'cursor-default'
+        }`}
+        onClick={() => {
+          if (suppressClickRef.current) {
+            suppressClickRef.current = false
+            return
+          }
+          selectClip(null)
+        }}
+        onScroll={(event) => {
+          setTimelineScrollLeft(event.currentTarget.scrollLeft)
+        }}
+      >
         <div
-          className="flex shrink-0 border-b border-fb-border"
-          style={{ height: RULER_HEIGHT }}
+          className="relative bg-fb-surface"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `${LABEL_WIDTH}px ${contentWidth}px`,
+            gridTemplateRows: `${RULER_HEIGHT}px ${Math.max(displayTracks.length, 1) * TRACK_HEIGHT}px`,
+            width: LABEL_WIDTH + contentWidth,
+            height:
+              RULER_HEIGHT + Math.max(displayTracks.length, 1) * TRACK_HEIGHT,
+          }}
         >
+          {/* Above the sticky ruler so horizontal scroll never paints ticks over titles */}
+          <div className="sticky top-0 left-0 z-40 border-r border-b border-fb-border bg-fb-ruler" />
+
           <div
-            className="shrink-0 border-r border-fb-border bg-fb-ruler"
-            style={{ width: LABEL_WIDTH }}
-          />
-          <div
-            ref={rulerScrollRef}
-            className="relative min-w-0 flex-1 cursor-ew-resize overflow-x-auto overflow-y-hidden bg-fb-ruler [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            onScroll={(event) => {
-              syncHorizontalScroll(event.currentTarget.scrollLeft, 'ruler')
-            }}
+            className="sticky top-0 z-30 cursor-ew-resize border-b border-fb-border bg-fb-ruler"
             onPointerDown={(event) => {
               event.preventDefault()
               event.stopPropagation()
-              isScrubbingRef.current = 'ruler'
-              seekFromClientX(event.clientX, 'ruler')
+              isScrubbingRef.current = true
+              seekFromClientX(event.clientX)
             }}
           >
-            <div
-              className="relative"
-              style={{ width: contentWidth, height: RULER_HEIGHT }}
-            >
-              {rulerMarks.map((mark) => (
-                <div
-                  key={mark.ms}
-                  className="absolute top-0 h-full"
-                  style={{
-                    left: TIMELINE_X_INSET + msToPx(mark.ms, pixelsPerSecond),
-                  }}
-                >
-                  <div
-                    className={`w-px bg-fb-border-strong ${
-                      mark.major
-                        ? 'h-full'
-                        : 'mt-3 h-[calc(100%-12px)]'
-                    }`}
-                  />
-                  {mark.major && (
-                    <span className="absolute top-1 left-1 font-mono text-[9px] text-fb-subtle">
-                      {formatTimecode(mark.ms)}
-                    </span>
-                  )}
-                </div>
-              ))}
+            {rulerMarks.map((mark) => (
               <div
-                className="pointer-events-none absolute inset-y-0 z-40 w-px bg-fb-playhead/80"
-                style={{ left: playheadLeft }}
-                aria-hidden
+                key={mark.ms}
+                className="absolute top-0 h-full"
+                style={{
+                  left: TIMELINE_X_INSET + msToPx(mark.ms, pixelsPerSecond),
+                }}
               >
-                <div className="absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-fb-playhead shadow-[0_0_8px_rgba(255,255,255,0.45)]" />
+                <div
+                  className={`w-px bg-fb-border-strong ${
+                    mark.major ? 'h-full' : 'mt-3 h-[calc(100%-12px)]'
+                  }`}
+                />
+                {mark.major && (
+                  <span className="absolute top-1 left-1 font-mono text-[9px] text-fb-subtle">
+                    {formatTimecode(mark.ms)}
+                  </span>
+                )}
               </div>
-            </div>
+            ))}
           </div>
-        </div>
 
-        <div
-          ref={bodyScrollRef}
-          className={`relative min-h-0 min-w-0 flex-1 overflow-auto ${
-            isHandDragging || isClipMoving ? 'cursor-grabbing' : 'cursor-default'
-          }`}
-          onClick={() => {
-            if (suppressClickRef.current) {
-              suppressClickRef.current = false
-              return
-            }
-            selectClip(null)
-          }}
-          onScroll={(event) => {
-            syncHorizontalScroll(event.currentTarget.scrollLeft, 'body')
-          }}
-        >
+          <div className="sticky left-0 z-40 border-r border-fb-border bg-fb-panel">
+            {displayTracks.map((track) => (
+              <div
+                key={track.id}
+                className="flex items-center gap-2 border-b border-fb-border bg-fb-panel px-2 text-[11px] font-medium text-fb-muted"
+                style={{ height: TRACK_HEIGHT }}
+              >
+                {track.kind === 'video' ? (
+                  <Film size={14} strokeWidth={1.6} />
+                ) : (
+                  <Music2 size={14} strokeWidth={1.6} />
+                )}
+                {track.name}
+              </div>
+            ))}
+          </div>
+
           <div
-            className="relative flex bg-fb-surface"
-            style={{
-              width: LABEL_WIDTH + contentWidth,
-              minHeight: Math.max(
-                displayTracks.length * TRACK_HEIGHT,
-                1,
-              ),
-            }}
+            ref={tracksContentRef}
+            className="relative bg-fb-surface"
           >
-            <div
-              className="sticky left-0 z-20 shrink-0 border-r border-fb-border bg-fb-panel"
-              style={{ width: LABEL_WIDTH }}
-            >
-              {displayTracks.map((track) => (
-                <div
-                  key={track.id}
-                  className="flex items-center gap-2 border-b border-fb-border bg-fb-panel px-2 text-[11px] font-medium text-fb-muted"
-                  style={{ height: TRACK_HEIGHT }}
-                >
-                  {track.kind === 'video' ? (
-                    <Film size={14} strokeWidth={1.6} />
-                  ) : (
-                    <Music2 size={14} strokeWidth={1.6} />
-                  )}
-                  {track.name}
-                </div>
-              ))}
-            </div>
-
-            <div
-              ref={tracksContentRef}
-              className="relative shrink-0 bg-fb-surface"
-              style={{ width: contentWidth }}
-            >
-              {displayTracks.map((track) => (
-                <div
-                  key={track.id}
-                  className="relative border-b border-fb-border bg-fb-surface"
-                  style={{ height: TRACK_HEIGHT }}
-                  onPointerDown={(event) => {
-                    if (event.target !== event.currentTarget) return
-                    if (event.button !== 0) return
-                    event.preventDefault()
-                    const viewport = bodyScrollRef.current
-                    if (!viewport) return
-                    panRef.current = {
-                      originClientX: event.clientX,
-                      originClientY: event.clientY,
-                      originScrollLeft: viewport.scrollLeft,
-                      originScrollTop: viewport.scrollTop,
-                      seekClientX: event.clientX,
-                      moved: false,
-                    }
-                  }}
-                >
-                  {document.clips
-                    .filter((clip) => {
-                      const placement = placementByClipId?.get(clip.id)
-                      if (placement) return placement.trackId === track.id
-                      return clip.trackId === track.id
-                    })
-                    .map((clip) => {
-                      const placement = placementByClipId?.get(clip.id)
-                      const isMoving = Boolean(
-                        clipDrag &&
-                          clipDrag.mode === 'move' &&
+            {displayTracks.map((track) => (
+              <div
+                key={track.id}
+                className="relative border-b border-fb-border bg-fb-surface"
+                style={{ height: TRACK_HEIGHT }}
+                onPointerDown={(event) => {
+                  if (event.target !== event.currentTarget) return
+                  if (event.button !== 0) return
+                  event.preventDefault()
+                  const viewport = bodyScrollRef.current
+                  if (!viewport) return
+                  panRef.current = {
+                    originClientX: event.clientX,
+                    originClientY: event.clientY,
+                    originScrollLeft: viewport.scrollLeft,
+                    originScrollTop: viewport.scrollTop,
+                    seekClientX: event.clientX,
+                    moved: false,
+                  }
+                }}
+              >
+                {document.clips
+                  .filter((clip) => {
+                    const placement = placementByClipId?.get(clip.id)
+                    if (placement) return placement.trackId === track.id
+                    return clip.trackId === track.id
+                  })
+                  .map((clip) => {
+                    const placement = placementByClipId?.get(clip.id)
+                    const isMoving = Boolean(
+                      clipDrag &&
+                        clipDrag.mode === 'move' &&
+                        (clipDrag.clipId === clip.id ||
+                          (Boolean(clipDrag.linkGroupId) &&
+                            clip.linkGroupId === clipDrag.linkGroupId)),
+                    )
+                    return (
+                      <TimelineClipBlock
+                        key={clip.id}
+                        clip={clip}
+                        track={track}
+                        pixelsPerSecond={pixelsPerSecond}
+                        selected={selectedClipIds.includes(clip.id)}
+                        linkedHighlight={
+                          !selectedClipIds.includes(clip.id) &&
+                          clip.linkGroupId != null &&
+                          selectedLinkGroupIds.has(clip.linkGroupId)
+                        }
+                        dragDeltaMs={
+                          clipDrag &&
                           (clipDrag.clipId === clip.id ||
                             (Boolean(clipDrag.linkGroupId) &&
-                              clip.linkGroupId === clipDrag.linkGroupId)),
-                      )
-                      return (
-                        <TimelineClipBlock
-                          key={clip.id}
-                          clip={clip}
-                          track={track}
-                          pixelsPerSecond={pixelsPerSecond}
-                          selected={selectedClipIds.includes(clip.id)}
-                          linkedHighlight={
-                            !selectedClipIds.includes(clip.id) &&
-                            clip.linkGroupId != null &&
-                            selectedLinkGroupIds.has(clip.linkGroupId)
-                          }
-                          dragDeltaMs={
-                            clipDrag &&
-                            (clipDrag.clipId === clip.id ||
-                              (Boolean(clipDrag.linkGroupId) &&
-                                clip.linkGroupId === clipDrag.linkGroupId))
-                              ? dragDeltaMs
-                              : 0
-                          }
-                          previewTimelineStartMs={placement?.timelineStartMs}
-                          isMoving={isMoving}
-                          onSelect={(additive) =>
-                            selectClip(clip.id, { additive })
-                          }
-                          onPointerDownMove={(clientX, clientY) => {
-                            dragDeltaMsRef.current = 0
-                            dragPreferredTrackIdRef.current = track.id
-                            setDragDeltaMs(0)
-                            setDragPreferredTrackId(track.id)
-                            setClipDrag({
-                              clipId: clip.id,
-                              mode: 'move',
-                              originClientX: clientX,
-                              originClientY: clientY,
-                              originTrackId: track.id,
-                              originTimelineStartMs: clip.timelineStartMs,
-                              originSourceInMs: clip.sourceInMs,
-                              originSourceOutMs: clip.sourceOutMs,
-                              linkGroupId: clip.linkGroupId,
-                            })
-                          }}
-                          onPointerDownTrim={(edge, clientX) => {
-                            dragDeltaMsRef.current = 0
-                            dragPreferredTrackIdRef.current = undefined
-                            setDragDeltaMs(0)
-                            setDragPreferredTrackId(undefined)
-                            setClipDrag({
-                              clipId: clip.id,
-                              mode: edge,
-                              originClientX: clientX,
-                              originClientY: 0,
-                              originTrackId: track.id,
-                              originTimelineStartMs: clip.timelineStartMs,
-                              originSourceInMs: clip.sourceInMs,
-                              originSourceOutMs: clip.sourceOutMs,
-                              linkGroupId: clip.linkGroupId,
-                            })
-                          }}
-                        />
-                      )
-                    })}
-                </div>
-              ))}
-            </div>
+                              clip.linkGroupId === clipDrag.linkGroupId))
+                            ? dragDeltaMs
+                            : 0
+                        }
+                        previewTimelineStartMs={placement?.timelineStartMs}
+                        isMoving={isMoving}
+                        onSelect={(additive) =>
+                          selectClip(clip.id, { additive })
+                        }
+                        onPointerDownMove={(clientX, clientY) => {
+                          dragDeltaMsRef.current = 0
+                          dragPreferredTrackIdRef.current = track.id
+                          setDragDeltaMs(0)
+                          setDragPreferredTrackId(track.id)
+                          setClipDrag({
+                            clipId: clip.id,
+                            mode: 'move',
+                            originClientX: clientX,
+                            originClientY: clientY,
+                            originTrackId: track.id,
+                            originTimelineStartMs: clip.timelineStartMs,
+                            originSourceInMs: clip.sourceInMs,
+                            originSourceOutMs: clip.sourceOutMs,
+                            linkGroupId: clip.linkGroupId,
+                          })
+                        }}
+                        onPointerDownTrim={(edge, clientX) => {
+                          dragDeltaMsRef.current = 0
+                          dragPreferredTrackIdRef.current = undefined
+                          setDragDeltaMs(0)
+                          setDragPreferredTrackId(undefined)
+                          setClipDrag({
+                            clipId: clip.id,
+                            mode: edge,
+                            originClientX: clientX,
+                            originClientY: 0,
+                            originTrackId: track.id,
+                            originTimelineStartMs: clip.timelineStartMs,
+                            originSourceInMs: clip.sourceInMs,
+                            originSourceOutMs: clip.sourceOutMs,
+                            linkGroupId: clip.linkGroupId,
+                          })
+                        }}
+                      />
+                    )
+                  })}
+              </div>
+            ))}
+          </div>
 
-            <div
-              className="pointer-events-none absolute inset-y-0 z-40 w-px bg-fb-playhead/80"
-              style={{ left: LABEL_WIDTH + playheadLeft }}
-              aria-hidden
-            />
+          <div
+            className="pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-fb-playhead/80"
+            style={{ left: LABEL_WIDTH + playheadLeft }}
+            aria-hidden
+          >
+            <div className="absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-fb-playhead shadow-[0_0_8px_rgba(255,255,255,0.45)]" />
           </div>
         </div>
       </div>

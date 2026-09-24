@@ -1,4 +1,4 @@
-import { Pause, Play, SkipBack, SkipForward } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Pause, Play, SkipBack, SkipForward } from 'lucide-react'
 import { useMemo, useRef } from 'react'
 import {
   getPlaybackEndMs,
@@ -9,7 +9,7 @@ import { useTimelinePlayback } from '@/features/editor/use-timeline-playback'
 import { getMediaSourceById } from '@/features/editor/project'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { useEditorStore } from '@/stores/editor-store'
-import { formatTimecode } from '@/utils/time'
+import { formatTimecode, stepPlayheadMs } from '@/utils/time'
 
 export function PreviewPanel() {
   const document = useEditorStore((state) => state.document)
@@ -18,9 +18,15 @@ export function PreviewPanel() {
   const playbackError = useEditorStore((state) => state.ui.playbackError)
   const togglePlayback = useEditorStore((state) => state.togglePlayback)
   const seekTo = useEditorStore((state) => state.seekTo)
+  const pause = useEditorStore((state) => state.pause)
 
   const mediaRef = useRef<HTMLVideoElement>(null)
   useTimelinePlayback(mediaRef)
+
+  const stepFrame = (frames: number) => {
+    if (isPlaying) pause()
+    seekTo(stepPlayheadMs(playheadMs, frames))
+  }
 
   const playbackTrack = useMemo(
     () => resolvePlaybackTrack(document),
@@ -116,16 +122,26 @@ export function PreviewPanel() {
           <span className="text-fb-subtle"> / </span>
           {formatTimecode(timelineDurationMs)}
         </div>
-        <div className="flex items-center gap-5">
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => seekTo(Math.max(0, playheadMs - 5000))}
+            onClick={() => seekTo(0)}
             disabled={timelineDurationMs <= 0}
-            aria-label="Previous"
-            title="Previous"
+            aria-label="Go to start"
+            title="Go to start"
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-white/65 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-white/[0.08]"
           >
             <SkipBack size={15} strokeWidth={1.75} />
+          </button>
+          <button
+            type="button"
+            onClick={() => stepFrame(-1)}
+            disabled={timelineDurationMs <= 0}
+            aria-label="Previous frame"
+            title="Previous frame (←)"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-white/65 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-white/[0.08]"
+          >
+            <ChevronLeft size={16} strokeWidth={1.75} />
           </button>
           <button
             type="button"
@@ -143,10 +159,20 @@ export function PreviewPanel() {
           </button>
           <button
             type="button"
-            onClick={() => seekTo(Math.min(timelineDurationMs, playheadMs + 5000))}
+            onClick={() => stepFrame(1)}
             disabled={timelineDurationMs <= 0}
-            aria-label="Next"
-            title="Next"
+            aria-label="Next frame"
+            title="Next frame (→)"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-white/65 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-white/[0.08]"
+          >
+            <ChevronRight size={16} strokeWidth={1.75} />
+          </button>
+          <button
+            type="button"
+            onClick={() => seekTo(timelineDurationMs)}
+            disabled={timelineDurationMs <= 0}
+            aria-label="Go to end"
+            title="Go to end"
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-white/65 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-white/[0.08]"
           >
             <SkipForward size={15} strokeWidth={1.75} />

@@ -65,7 +65,7 @@ export function MediaPanel() {
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-none p-2">
         {mediaSources.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center">
             <Film size={20} className="text-fb-subtle" strokeWidth={1.5} />

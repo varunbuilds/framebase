@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useEditorHistory, useEditorStore } from '@/stores/editor-store'
+import { stepPlayheadMs } from '@/utils/time'
 
 export function TopToolbar() {
   const projectName = useEditorStore((state) => state.document.name)
@@ -14,6 +15,8 @@ export function TopToolbar() {
   const lastSavedAt = useEditorStore((state) => state.ui.lastSavedAt)
   const markSaved = useEditorStore((state) => state.markSaved)
   const togglePlayback = useEditorStore((state) => state.togglePlayback)
+  const seekTo = useEditorStore((state) => state.seekTo)
+  const pause = useEditorStore((state) => state.pause)
   const { undo, redo, canUndo, canRedo } = useEditorHistory()
   const [editingName, setEditingName] = useState(false)
   const [draftName, setDraftName] = useState(projectName)
@@ -52,6 +55,21 @@ export function TopToolbar() {
         return
       }
 
+      if (
+        (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey
+      ) {
+        if (typingInField) return
+        event.preventDefault()
+        const { isPlaying, playheadMs } = useEditorStore.getState().ui
+        if (isPlaying) pause()
+        const frames = event.key === 'ArrowLeft' ? -1 : 1
+        seekTo(stepPlayheadMs(playheadMs, frames))
+        return
+      }
+
       const meta = event.metaKey || event.ctrlKey
       if (!meta) return
       if (event.key.toLowerCase() === 'z' && !event.shiftKey) {
@@ -72,7 +90,7 @@ export function TopToolbar() {
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [canUndo, canRedo, undo, redo, markSaved, togglePlayback])
+  }, [canUndo, canRedo, undo, redo, markSaved, togglePlayback, seekTo, pause])
 
   const beginEditingName = () => {
     setDraftName(projectName)
