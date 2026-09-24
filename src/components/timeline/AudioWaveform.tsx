@@ -4,14 +4,17 @@ import {
   samplePeakWindow,
 } from '@/lib/media/waveform'
 
-/** Cap drawing resolution so very wide (zoomed) clips stay responsive. */
-const MAX_CANVAS_WIDTH = 1400
-const MAX_SAMPLES = 420
+/** Cap CSS width so extremely zoomed clips stay drawable. */
+const MAX_CSS_WIDTH = 2400
 
-function cappedDrawWidth(widthPx: number): number {
-  return Math.max(8, Math.min(MAX_CANVAS_WIDTH, Math.floor(widthPx) || 8))
+function cappedCssWidth(widthPx: number): number {
+  return Math.max(8, Math.min(MAX_CSS_WIDTH, Math.floor(widthPx) || 8))
 }
 
+/**
+ * Resolve/Premiere-style audio lane: dense vertical stems at device-pixel
+ * resolution (not a soft filled blob).
+ */
 export function AudioWaveform({
   mediaSourceId,
   src,
@@ -28,31 +31,36 @@ export function AudioWaveform({
   widthPx: number
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const drawWidth = cappedDrawWidth(widthPx)
+  const cssWidth = cappedCssWidth(widthPx)
 
   useEffect(() => {
     let cancelled = false
     const canvas = canvasRef.current
     if (!canvas) return
 
-    const sampleCount = Math.max(
-      24,
-      Math.min(MAX_SAMPLES, Math.floor(drawWidth / 1.5)),
-    )
-    const height = 72
-    const midY = height / 2
-    const amplitudeScale = height * 0.42
+    const dpr = Math.min(3, window.devicePixelRatio || 1)
+    const cssHeight = 80
+    const pixelWidth = Math.max(1, Math.round(cssWidth * dpr))
+    const pixelHeight = Math.max(1, Math.round(cssHeight * dpr))
+    // One stem per device pixel for a crisp NLE look.
+    const sampleCount = pixelWidth
 
-    canvas.width = drawWidth
-    canvas.height = height
+    canvas.width = pixelWidth
+    canvas.height = pixelHeight
+    canvas.style.width = '100%'
+    canvas.style.height = '100%'
 
     const context = canvas.getContext('2d')
     if (!context) return
 
+    // Draw in device pixels — avoids subpixel blur from CSS scaling.
+    context.setTransform(1, 0, 0, 1, 0, 0)
+    context.imageSmoothingEnabled = false
+
     const paintBackground = () => {
-      context.clearRect(0, 0, drawWidth, height)
+      context.clearRect(0, 0, pixelWidth, pixelHeight)
       context.fillStyle = '#16352c'
-      context.fillRect(0, 0, drawWidth, height)
+      context.fillRect(0, 0, pixelWidth, pixelHeight)
     }
 
     paintBackground()
@@ -70,45 +78,20 @@ export function AudioWaveform({
 
         paintBackground()
 
-        // Soft center guide like Premiere / Resolve audio lanes.
-        context.strokeStyle = 'rgba(110, 220, 170, 0.18)'
-        context.lineWidth = 1
-        context.beginPath()
-        context.moveTo(0, midY)
-        context.lineTo(drawWidth, midY)
-        context.stroke()
+        const midY = pixelHeight / 2
+        const amplitudeScale = pixelHeight * 0.46
 
-        if (samples.length === 0) return
+        // Center guide
+        context.fillStyle = 'rgba(110, 220, 170, 0.22)'
+        context.fillRect(0, Math.round(midY), pixelWidth, 1)
 
-        const step = drawWidth / Math.max(1, samples.length - 1)
-
-        // Continuous mirrored envelope — filled waveform, not discrete bars.
-        context.beginPath()
-        context.moveTo(0, midY)
-
-        for (let index = 0; index < samples.length; index += 1) {
-          const amplitude = samples[index] ?? 0
-          const y = midY - Math.max(0.5, amplitude * amplitudeScale)
-          const x = index * step
-          if (index === 0) context.lineTo(x, y)
-          else context.lineTo(x, y)
+        // Dense vertical stems (classic timeline waveform).
+        context.fillStyle = 'rgba(130, 230, 185, 0.92)'
+        for (let x = 0; x < samples.length; x += 1) {
+          const amplitude = samples[x] ?? 0
+          const half = Math.max(1, Math.round(amplitude * amplitudeScale))
+          context.fillRect(x, Math.round(midY - half), 1, half * 2)
         }
-
-        for (let index = samples.length - 1; index >= 0; index -= 1) {
-          const amplitude = samples[index] ?? 0
-          const y = midY + Math.max(0.5, amplitude * amplitudeScale)
-          const x = index * step
-          context.lineTo(x, y)
-        }
-
-        context.closePath()
-        context.fillStyle = 'rgba(110, 220, 170, 0.55)'
-        context.fill()
-
-        context.strokeStyle = 'rgba(150, 235, 190, 0.9)'
-        context.lineWidth = 1
-        context.lineJoin = 'round'
-        context.stroke()
       })
       .catch(() => {
         // Keep the solid fallback fill already painted.
@@ -117,7 +100,7 @@ export function AudioWaveform({
     return () => {
       cancelled = true
     }
-  }, [drawWidth, mediaDurationMs, mediaSourceId, sourceInMs, sourceOutMs, src])
+  }, [cssWidth, mediaDurationMs, mediaSourceId, sourceInMs, sourceOutMs, src])
 
   return (
     <canvas

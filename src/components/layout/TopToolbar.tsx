@@ -13,6 +13,7 @@ export function TopToolbar() {
   const saveStatus = useEditorStore((state) => state.ui.saveStatus)
   const lastSavedAt = useEditorStore((state) => state.ui.lastSavedAt)
   const markSaved = useEditorStore((state) => state.markSaved)
+  const togglePlayback = useEditorStore((state) => state.togglePlayback)
   const { undo, redo, canUndo, canRedo } = useEditorHistory()
   const [editingName, setEditingName] = useState(false)
   const [draftName, setDraftName] = useState(projectName)
@@ -27,6 +28,30 @@ export function TopToolbar() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const typingInField =
+        target != null &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+
+      if (
+        (event.code === 'Space' || event.key === ' ') &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey
+      ) {
+        if (typingInField) return
+        event.preventDefault()
+        event.stopPropagation()
+        const active = globalThis.document.activeElement
+        if (active instanceof HTMLElement && active !== globalThis.document.body) {
+          active.blur()
+        }
+        togglePlayback()
+        return
+      }
+
       const meta = event.metaKey || event.ctrlKey
       if (!meta) return
       if (event.key.toLowerCase() === 'z' && !event.shiftKey) {
@@ -45,9 +70,9 @@ export function TopToolbar() {
         markSaved()
       }
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [canUndo, canRedo, undo, redo, markSaved])
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [canUndo, canRedo, undo, redo, markSaved, togglePlayback])
 
   const beginEditingName = () => {
     setDraftName(projectName)

@@ -3,7 +3,8 @@
 const peaksCache = new Map<string, Float32Array>()
 const inflight = new Map<string, Promise<Float32Array>>()
 
-const DEFAULT_PEAK_COUNT = 800
+/** Dense enough for sharp zoomed-in clip waveforms. */
+const DEFAULT_PEAK_COUNT = 16_000
 
 function mixChannels(buffer: AudioBuffer): Float32Array {
   const { numberOfChannels, length } = buffer
@@ -73,7 +74,10 @@ export function getWaveformPeaks(
   peakCount = DEFAULT_PEAK_COUNT,
 ): Promise<Float32Array> {
   const cached = peaksCache.get(mediaSourceId)
-  if (cached) return Promise.resolve(cached)
+  // Re-decode if an older, coarser cache entry exists.
+  if (cached && cached.length >= peakCount) {
+    return Promise.resolve(cached)
+  }
 
   const existing = inflight.get(mediaSourceId)
   if (existing) return existing
@@ -100,7 +104,8 @@ export function clearWaveformPeaks(mediaSourceId: string): void {
 
 /**
  * Sample a window of full-file peaks into `barCount` display bars for a
- * source-in/source-out range.
+ * source-in/source-out range. Upsamples with linear interpolation when the
+ * window has fewer peaks than display columns (avoids blocky stairs).
  */
 export function samplePeakWindow(
   peaks: Float32Array,
@@ -120,11 +125,34 @@ export function samplePeakWindow(
   const windowSize = endIndex - startIndex
   const sampled = new Float32Array(barCount)
 
+  if (windowSize <= 1) {
+    const value = peaks[startIndex] ?? 0
+    sampled.fill(value)
+    return sampled
+  }
+
+  if (windowSize < barCount) {
+    // Upsample — interpolate so zoomed clips stay smooth instead of stepped.
+    for (let i = 0; i < barCount; i += 1) {
+      const pos =
+        startIndex + (i / Math.max(1, barCount - 1)) * (windowSize - 1)
+      const lo = Math.floor(pos)
+      const hi = Math.min(endIndex - 1, lo + 1)
+      const t = pos - lo
+      sampled[i] = (peaks[lo] ?? 0) * (1 - t) + (peaks[hi] ?? 0) * t
+    }
+    return sampled
+  }
+
   for (let i = 0; i < barCount; i += 1) {
     const relStart = Math.floor((i / barCount) * windowSize)
     const relEnd = Math.floor(((i + 1) / barCount) * windowSize)
     let max = 0
-    for (let j = startIndex + relStart; j < startIndex + Math.max(relEnd, relStart + 1); j += 1) {
+    for (
+      let j = startIndex + relStart;
+      j < startIndex + Math.max(relEnd, relStart + 1);
+      j += 1
+    ) {
       max = Math.max(max, peaks[j] ?? 0)
     }
     sampled[i] = max

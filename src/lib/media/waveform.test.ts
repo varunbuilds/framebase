@@ -11,8 +11,13 @@ describe('samplePeakWindow', () => {
     expect(sampled[3]!).toBeGreaterThan(sampled[0]!)
   })
 
-  it('returns empty bars for invalid inputs', () => {
-    expect(samplePeakWindow(new Float32Array(0), 0, 1000, 1000, 8).length).toBe(8)
-    expect(samplePeakWindow(new Float32Array([1]), 0, 1000, 0, 4).length).toBe(4)
+  it('upsamples short windows without blocky stairs', () => {
+    const peaks = Float32Array.from([0, 1])
+    const sampled = samplePeakWindow(peaks, 0, 1000, 1000, 5)
+    expect(sampled.length).toBe(5)
+    expect(sampled[0]!).toBeCloseTo(0, 5)
+    expect(sampled[4]!).toBeCloseTo(1, 5)
+    expect(sampled[2]!).toBeGreaterThan(0.4)
+    expect(sampled[2]!).toBeLessThan(0.6)
   })
 })

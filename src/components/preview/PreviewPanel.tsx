@@ -132,8 +132,8 @@ export function PreviewPanel() {
             onClick={() => togglePlayback()}
             disabled={timelineDurationMs <= 0 && !isPlaying}
             aria-label={isPlaying ? 'Pause' : 'Play'}
-            title={isPlaying ? 'Pause' : 'Play'}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-black disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-white/85"
+            title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-black outline-none disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-white/85 focus-visible:outline-none"
           >
             {isPlaying ? (
               <Pause size={14} strokeWidth={1.75} />

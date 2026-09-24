@@ -27,6 +27,8 @@ import { clamp, formatTimecode } from '@/utils/time'
 const TRACK_HEIGHT = 104
 const RULER_HEIGHT = 28
 const LABEL_WIDTH = 88
+/** Keeps the clip border/selection ring from clipping under the track titles. */
+const TIMELINE_X_INSET = 2
 const TIMELINE_MIN_HEIGHT = 220
 const TIMELINE_MAX_HEIGHT = 720
 /** Leave room for the toolbar + a usable preview region. */
@@ -54,15 +56,15 @@ function pxToMs(px: number, pixelsPerSecond: number): number {
   return Math.round((px / pixelsPerSecond) * 1000)
 }
 
-/** Hit-test a track row under the pointer (content area, below the ruler). */
+/** Hit-test a track row under the pointer in the vertically scrolling body. */
 function trackIdAtClientY(args: {
   clientY: number
-  contentTop: number
+  bodyTop: number
   scrollTop: number
   tracks: Track[]
   kind?: Track['kind']
 }): string | undefined {
-  const y = args.clientY - args.contentTop + args.scrollTop - RULER_HEIGHT
+  const y = args.clientY - args.bodyTop + args.scrollTop
   if (args.tracks.length === 0) return undefined
 
   if (y < 0) {
@@ -84,13 +86,19 @@ function trackIdAtClientY(args: {
 function VideoFilmstrip({
   src,
   durationMs,
+  widthPx,
 }: {
   src: string
   durationMs: number
+  widthPx: number
 }) {
   const [frames, setFrames] = useState<string[]>([])
-  // Duration-based frame count — avoid re-decoding on every zoom width change.
-  const frameCount = Math.max(3, Math.min(12, Math.ceil(durationMs / 1500)))
+  // Quantize width so zooming doesn't re-decode every pixel; denser than before.
+  const widthBucket = Math.max(160, Math.ceil(widthPx / 64) * 64)
+  const frameCount = Math.max(
+    6,
+    Math.min(40, Math.ceil(widthBucket / 56), Math.ceil(durationMs / 600)),
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -99,29 +107,39 @@ function VideoFilmstrip({
     video.muted = true
     video.preload = 'auto'
     video.playsInline = true
+    video.crossOrigin = 'anonymous'
 
     const captureFrames = async () => {
       const duration = Number.isFinite(video.duration)
         ? Math.min(video.duration, durationMs / 1000)
         : durationMs / 1000
-      const nextFrames: string[] = []
+
+      const sourceW = video.videoWidth || 320
+      const sourceH = video.videoHeight || 180
+      const maxEdge = 360
+      const scale = Math.min(1, maxEdge / Math.max(sourceW, sourceH))
       const canvas = document.createElement('canvas')
-      canvas.width = 120
-      canvas.height = 68
+      canvas.width = Math.max(1, Math.round(sourceW * scale))
+      canvas.height = Math.max(1, Math.round(sourceH * scale))
       const context = canvas.getContext('2d')
       if (!context) return
+      context.imageSmoothingEnabled = true
+      context.imageSmoothingQuality = 'high'
+
+      const nextFrames: string[] = []
       for (let index = 0; index < frameCount; index += 1) {
         await new Promise<void>((resolve) => {
           video.onseeked = () => resolve()
           video.onerror = () => resolve()
           video.currentTime = Math.min(
-            Math.max(0, duration - 0.05),
+            Math.max(0, duration - 0.04),
             (duration * (index + 0.5)) / frameCount,
           )
         })
         if (cancelled) return
+        context.clearRect(0, 0, canvas.width, canvas.height)
         context.drawImage(video, 0, 0, canvas.width, canvas.height)
-        nextFrames.push(canvas.toDataURL('image/jpeg', 0.7))
+        nextFrames.push(canvas.toDataURL('image/jpeg', 0.92))
       }
       if (!cancelled) setFrames(nextFrames)
     }
@@ -144,11 +162,12 @@ function VideoFilmstrip({
     <div className="pointer-events-none flex h-full w-full overflow-hidden" aria-hidden>
       {frames.map((frame, index) => (
         <img
-          key={`${index}-${frame.slice(-12)}`}
+          key={`${index}-${frame.slice(-16)}`}
           src={frame}
           className="h-full min-w-0 flex-1 object-cover"
           alt=""
           draggable={false}
+          decoding="async"
         />
       ))}
     </div>
@@ -163,6 +182,7 @@ function TimelineClipBlock({
   linkedHighlight,
   dragDeltaMs,
   previewTimelineStartMs,
+  isMoving,
   onSelect,
   onPointerDownMove,
   onPointerDownTrim,
@@ -175,6 +195,7 @@ function TimelineClipBlock({
   dragDeltaMs: number
   /** When set (live move plan), overrides timeline start instead of delta. */
   previewTimelineStartMs?: number
+  isMoving: boolean
   onSelect: (additive: boolean) => void
   onPointerDownMove: (clientX: number, clientY: number) => void
   onPointerDownTrim: (edge: 'trim-in' | 'trim-out', clientX: number) => void
@@ -234,7 +255,7 @@ function TimelineClipBlock({
         onSelect(event.metaKey || event.ctrlKey)
       }}
       onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
+        if (event.key === 'Enter') {
           event.preventDefault()
           onSelect(event.metaKey || event.ctrlKey)
         }
@@ -247,18 +268,18 @@ function TimelineClipBlock({
         onSelect(event.metaKey || event.ctrlKey)
         onPointerDownMove(event.clientX, event.clientY)
       }}
-      className={`absolute top-1.5 z-0 flex h-[calc(100%-12px)] cursor-grab flex-col overflow-hidden rounded-md border active:cursor-grabbing ${
-        isVideo
-          ? 'border-[#2a3a45] bg-[#151c22]'
-          : 'border-[#1f3d34] bg-[#13241f]'
-      } ${
+      className={`absolute top-1.5 z-0 flex h-[calc(100%-12px)] flex-col overflow-hidden rounded-md border-2 ${
+        isMoving ? 'cursor-grabbing' : 'cursor-default'
+      } ${isVideo ? 'bg-[#151c22]' : 'bg-[#13241f]'} ${
         selected
-          ? 'ring-1 ring-fb-accent'
+          ? 'border-fb-accent'
           : linkedHighlight
-            ? 'ring-1 ring-fb-accent/70'
-            : ''
+            ? 'border-fb-accent/70'
+            : isVideo
+              ? 'border-[#2a3a45]'
+              : 'border-[#1f3d34]'
       }`}
-      style={{ left, width }}
+      style={{ left: TIMELINE_X_INSET + left, width }}
     >
       <div className="relative flex h-[22px] shrink-0 items-center bg-[#243038] px-2">
         <span className="truncate text-[10px] font-medium leading-none text-white/90">
@@ -272,7 +293,11 @@ function TimelineClipBlock({
         }`}
       >
         {isVideo && objectUrl ? (
-          <VideoFilmstrip src={objectUrl} durationMs={durationMs} />
+          <VideoFilmstrip
+            src={objectUrl}
+            durationMs={durationMs}
+            widthPx={width}
+          />
         ) : objectUrl && media ? (
           <AudioWaveform
             mediaSourceId={media.id}
@@ -342,16 +367,29 @@ export function TimelinePanel() {
     (state) => state.unlinkSelectedClips,
   )
 
-  const scrollRef = useRef<HTMLDivElement>(null)
+  /** Single scroller for both axes; track labels are sticky-left inside. */
+  const bodyScrollRef = useRef<HTMLDivElement>(null)
+  const rulerScrollRef = useRef<HTMLDivElement>(null)
   const tracksContentRef = useRef<HTMLDivElement>(null)
   const dragDeltaMsRef = useRef(0)
   const dragPreferredTrackIdRef = useRef<string | undefined>(undefined)
-  const isScrubbingRef = useRef(false)
+  const isScrubbingRef = useRef<'body' | 'ruler' | null>(null)
+  const panRef = useRef<{
+    originClientX: number
+    originClientY: number
+    originScrollLeft: number
+    originScrollTop: number
+    seekClientX: number
+    moved: boolean
+  } | null>(null)
   const restoredScrollRef = useRef(false)
+  const syncingHorizontalScrollRef = useRef(false)
   const [dragDeltaMs, setDragDeltaMs] = useState(0)
   const [dragPreferredTrackId, setDragPreferredTrackId] = useState<
     string | undefined
   >(undefined)
+  const [isHandDragging, setIsHandDragging] = useState(false)
+  const suppressClickRef = useRef(false)
   const [viewportWidth, setViewportWidth] = useState(0)
 
   const tracks = getSortedTracks(document)
@@ -371,7 +409,7 @@ export function TimelinePanel() {
     800,
     viewportWidth,
     msToPx(durationMs, pixelsPerSecond) + 120,
-  )
+  ) + TIMELINE_X_INSET
 
   const primaryDragClip =
     clipDrag != null
@@ -420,12 +458,26 @@ export function TimelinePanel() {
   displayTracksRef.current = displayTracks
 
   const seekFromClientX = useCallback(
-    (clientX: number) => {
-      const viewport = scrollRef.current
+    (clientX: number, source: 'body' | 'ruler' = 'body') => {
+      if (source === 'ruler') {
+        const ruler = rulerScrollRef.current
+        if (!ruler) return
+        const bounds = ruler.getBoundingClientRect()
+        const x =
+          clientX - bounds.left + ruler.scrollLeft - TIMELINE_X_INSET
+        seekTo(clamp(pxToMs(x, pixelsPerSecond), 0, durationMs))
+        return
+      }
+
+      const viewport = bodyScrollRef.current
       if (!viewport) return
       const bounds = viewport.getBoundingClientRect()
       const x =
-        clientX - bounds.left + viewport.scrollLeft - LABEL_WIDTH
+        clientX -
+        bounds.left +
+        viewport.scrollLeft -
+        LABEL_WIDTH -
+        TIMELINE_X_INSET
       seekTo(clamp(pxToMs(x, pixelsPerSecond), 0, durationMs))
     },
     [durationMs, pixelsPerSecond, seekTo],
@@ -433,12 +485,12 @@ export function TimelinePanel() {
 
   const zoomAtClientX = useCallback(
     (clientX: number, direction: 1 | -1) => {
-      const viewport = scrollRef.current
+      const viewport = bodyScrollRef.current
       if (!viewport) return
       const bounds = viewport.getBoundingClientRect()
       const cursorOffset = clientX - bounds.left
       const timeAtCursorMs = pxToMs(
-        viewport.scrollLeft + cursorOffset - LABEL_WIDTH,
+        viewport.scrollLeft + cursorOffset - LABEL_WIDTH - TIMELINE_X_INSET,
         pixelsPerSecond,
       )
       const nextPixelsPerSecond = clamp(
@@ -452,15 +504,41 @@ export function TimelinePanel() {
         const nextLeft =
           msToPx(timeAtCursorMs, nextPixelsPerSecond) -
           cursorOffset +
-          LABEL_WIDTH
+          LABEL_WIDTH +
+          TIMELINE_X_INSET
         viewport.scrollLeft = Math.max(0, nextLeft)
+        const ruler = rulerScrollRef.current
+        if (ruler) ruler.scrollLeft = viewport.scrollLeft
       })
     },
     [pixelsPerSecond, setPixelsPerSecond],
   )
 
+  const syncHorizontalScroll = useCallback(
+    (scrollLeft: number, source: 'body' | 'ruler') => {
+      if (syncingHorizontalScrollRef.current) return
+      syncingHorizontalScrollRef.current = true
+      if (source === 'body') {
+        const ruler = rulerScrollRef.current
+        if (ruler && ruler.scrollLeft !== scrollLeft) {
+          ruler.scrollLeft = scrollLeft
+        }
+      } else {
+        const body = bodyScrollRef.current
+        if (body && body.scrollLeft !== scrollLeft) {
+          body.scrollLeft = scrollLeft
+        }
+      }
+      syncingHorizontalScrollRef.current = false
+      if (useEditorStore.getState().ui.timelineScrollLeft !== scrollLeft) {
+        setTimelineScrollLeft(scrollLeft)
+      }
+    },
+    [setTimelineScrollLeft],
+  )
+
   useEffect(() => {
-    const viewport = scrollRef.current
+    const viewport = bodyScrollRef.current
     if (!viewport) return
 
     // Non-passive so ctrl/meta+wheel never falls through to browser page-zoom,
@@ -474,7 +552,6 @@ export function TimelinePanel() {
     viewport.addEventListener('wheel', onWheel, { passive: false })
     return () => viewport.removeEventListener('wheel', onWheel)
   }, [zoomAtClientX])
-
   const rulerMarks = useMemo(() => {
     const marks: Array<{ ms: number; major: boolean }> = []
     const stepMs =
@@ -564,13 +641,13 @@ export function TimelinePanel() {
       setDragDeltaMs(next)
 
       if (clipDrag.mode === 'move') {
-        const viewport = scrollRef.current
-        if (viewport && primaryDragKind) {
-          const bounds = viewport.getBoundingClientRect()
+        const body = bodyScrollRef.current
+        if (body && primaryDragKind) {
+          const bounds = body.getBoundingClientRect()
           const preferred = trackIdAtClientY({
             clientY: event.clientY,
-            contentTop: bounds.top,
-            scrollTop: viewport.scrollTop,
+            bodyTop: bounds.top,
+            scrollTop: body.scrollTop,
             tracks: displayTracksRef.current,
             kind: primaryDragKind,
           })
@@ -594,28 +671,75 @@ export function TimelinePanel() {
 
   useEffect(() => {
     const onMove = (event: PointerEvent) => {
-      if (isScrubbingRef.current) seekFromClientX(event.clientX)
+      if (isScrubbingRef.current) {
+        seekFromClientX(event.clientX, isScrubbingRef.current)
+        return
+      }
+
+      const pan = panRef.current
+      const body = bodyScrollRef.current
+      if (!pan || !body) return
+
+      const dx = event.clientX - pan.originClientX
+      const dy = event.clientY - pan.originClientY
+      if (!pan.moved && Math.hypot(dx, dy) > 4) {
+        pan.moved = true
+        setIsHandDragging(true)
+      }
+      if (!pan.moved) return
+
+      body.scrollLeft = Math.max(0, pan.originScrollLeft - dx)
+      body.scrollTop = Math.max(0, pan.originScrollTop - dy)
+      syncHorizontalScroll(body.scrollLeft, 'body')
     }
+
     const onUp = () => {
-      isScrubbingRef.current = false
+      if (isScrubbingRef.current) {
+        isScrubbingRef.current = null
+        return
+      }
+
+      const pan = panRef.current
+      if (!pan) return
+      if (!pan.moved) {
+        seekFromClientX(pan.seekClientX, 'body')
+      } else {
+        suppressClickRef.current = true
+      }
+      panRef.current = null
+      setIsHandDragging(false)
     }
+
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     return () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
-  }, [seekFromClientX])
+  }, [seekFromClientX, syncHorizontalScroll])
+
+  const isClipMoving = clipDrag?.mode === 'move'
+  useEffect(() => {
+    const handActive = isHandDragging || Boolean(isClipMoving)
+    if (!handActive) return
+    const previous = globalThis.document.body.style.cursor
+    globalThis.document.body.style.cursor = 'grabbing'
+    return () => {
+      globalThis.document.body.style.cursor = previous
+    }
+  }, [isClipMoving, isHandDragging])
 
   useEffect(() => {
-    const viewport = scrollRef.current
+    const viewport = bodyScrollRef.current
     if (!viewport || restoredScrollRef.current) return
     viewport.scrollLeft = timelineScrollLeft
+    const ruler = rulerScrollRef.current
+    if (ruler) ruler.scrollLeft = timelineScrollLeft
     restoredScrollRef.current = true
   }, [timelineScrollLeft])
 
   useEffect(() => {
-    const viewport = scrollRef.current
+    const viewport = bodyScrollRef.current
     if (!viewport) return
     const resizeObserver = new ResizeObserver(() => {
       setViewportWidth(Math.max(0, viewport.clientWidth - LABEL_WIDTH))
@@ -627,21 +751,24 @@ export function TimelinePanel() {
 
   useEffect(() => {
     if (!isPlaying) return
-    const viewport = scrollRef.current
+    const viewport = bodyScrollRef.current
     if (!viewport) return
-    const playheadX = msToPx(playheadMs, pixelsPerSecond) + LABEL_WIDTH
+    const playheadX =
+      LABEL_WIDTH + TIMELINE_X_INSET + msToPx(playheadMs, pixelsPerSecond)
     const inset = 80
     if (
-      playheadX < viewport.scrollLeft + inset + LABEL_WIDTH ||
+      playheadX < viewport.scrollLeft + LABEL_WIDTH + inset ||
       playheadX > viewport.scrollLeft + viewport.clientWidth - inset
     ) {
       viewport.scrollTo({
         left: Math.max(
           0,
-          playheadX - viewport.clientWidth / 2,
+          playheadX - (viewport.clientWidth + LABEL_WIDTH) / 2,
         ),
         behavior: 'auto',
       })
+      const ruler = rulerScrollRef.current
+      if (ruler) ruler.scrollLeft = viewport.scrollLeft
     }
   }, [isPlaying, pixelsPerSecond, playheadMs])
 
@@ -668,7 +795,7 @@ export function TimelinePanel() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [removeClip, selectedClipIds])
 
-  const playheadLeft = msToPx(playheadMs, pixelsPerSecond)
+  const playheadLeft = TIMELINE_X_INSET + msToPx(playheadMs, pixelsPerSecond)
 
   const onResizePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -796,65 +923,39 @@ export function TimelinePanel() {
         </div>
       </div>
 
-      <div
-        ref={scrollRef}
-        className="min-h-0 min-w-0 flex-1 overflow-auto"
-        onClick={() => selectClip(null)}
-        onScroll={(event) =>
-          setTimelineScrollLeft(event.currentTarget.scrollLeft)
-        }
-      >
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div
-          ref={tracksContentRef}
-          className="relative flex min-w-full"
-          style={{
-            width: LABEL_WIDTH + contentWidth,
-            minHeight: `max(100%, ${RULER_HEIGHT + displayTracks.length * TRACK_HEIGHT}px)`,
-          }}
+          className="flex shrink-0 border-b border-fb-border"
+          style={{ height: RULER_HEIGHT }}
         >
           <div
-            className="sticky left-0 z-20 shrink-0 border-r border-fb-border bg-fb-panel"
+            className="shrink-0 border-r border-fb-border bg-fb-ruler"
             style={{ width: LABEL_WIDTH }}
-          >
-            <div
-              className="sticky top-0 z-30 border-b border-fb-border bg-fb-ruler"
-              style={{ height: RULER_HEIGHT }}
-            />
-            {displayTracks.map((track) => (
-              <div
-                key={track.id}
-                className="flex items-center gap-2 border-b border-fb-border bg-fb-panel px-2 text-[11px] font-medium text-fb-muted"
-                style={{ height: TRACK_HEIGHT }}
-              >
-                {track.kind === 'video' ? (
-                  <Film size={14} strokeWidth={1.6} />
-                ) : (
-                  <Music2 size={14} strokeWidth={1.6} />
-                )}
-                {track.name}
-              </div>
-            ))}
-          </div>
-
+          />
           <div
-            className="relative min-w-0 flex-1 bg-fb-surface"
-            style={{ minWidth: contentWidth }}
+            ref={rulerScrollRef}
+            className="relative min-w-0 flex-1 cursor-ew-resize overflow-x-auto overflow-y-hidden bg-fb-ruler [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            onScroll={(event) => {
+              syncHorizontalScroll(event.currentTarget.scrollLeft, 'ruler')
+            }}
+            onPointerDown={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              isScrubbingRef.current = 'ruler'
+              seekFromClientX(event.clientX, 'ruler')
+            }}
           >
             <div
-              className="sticky top-0 z-30 cursor-ew-resize border-b border-fb-border bg-fb-ruler"
-              style={{ height: RULER_HEIGHT }}
-              onPointerDown={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                isScrubbingRef.current = true
-                seekFromClientX(event.clientX)
-              }}
+              className="relative"
+              style={{ width: contentWidth, height: RULER_HEIGHT }}
             >
               {rulerMarks.map((mark) => (
                 <div
                   key={mark.ms}
                   className="absolute top-0 h-full"
-                  style={{ left: msToPx(mark.ms, pixelsPerSecond) }}
+                  style={{
+                    left: TIMELINE_X_INSET + msToPx(mark.ms, pixelsPerSecond),
+                  }}
                 >
                   <div
                     className={`w-px bg-fb-border-strong ${
@@ -870,99 +971,175 @@ export function TimelinePanel() {
                   )}
                 </div>
               ))}
-            </div>
-
-            {displayTracks.map((track) => (
               <div
-                key={track.id}
-                className="relative border-b border-fb-border bg-fb-surface"
-                style={{ height: TRACK_HEIGHT }}
-                onPointerDown={(event) => {
-                  if (event.target !== event.currentTarget) return
-                  event.preventDefault()
-                  isScrubbingRef.current = true
-                  seekFromClientX(event.clientX)
-                }}
+                className="pointer-events-none absolute inset-y-0 z-40 w-px bg-fb-playhead/80"
+                style={{ left: playheadLeft }}
+                aria-hidden
               >
-                {document.clips
-                  .filter((clip) => {
-                    const placement = placementByClipId?.get(clip.id)
-                    if (placement) return placement.trackId === track.id
-                    return clip.trackId === track.id
-                  })
-                  .map((clip) => {
-                    const placement = placementByClipId?.get(clip.id)
-                    return (
-                      <TimelineClipBlock
-                        key={clip.id}
-                        clip={clip}
-                        track={track}
-                        pixelsPerSecond={pixelsPerSecond}
-                        selected={selectedClipIds.includes(clip.id)}
-                        linkedHighlight={
-                          !selectedClipIds.includes(clip.id) &&
-                          clip.linkGroupId != null &&
-                          selectedLinkGroupIds.has(clip.linkGroupId)
-                        }
-                        dragDeltaMs={
-                          clipDrag &&
-                          (clipDrag.clipId === clip.id ||
-                            (Boolean(clipDrag.linkGroupId) &&
-                              clip.linkGroupId === clipDrag.linkGroupId))
-                            ? dragDeltaMs
-                            : 0
-                        }
-                        previewTimelineStartMs={placement?.timelineStartMs}
-                        onSelect={(additive) =>
-                          selectClip(clip.id, { additive })
-                        }
-                        onPointerDownMove={(clientX, clientY) => {
-                          dragDeltaMsRef.current = 0
-                          dragPreferredTrackIdRef.current = track.id
-                          setDragDeltaMs(0)
-                          setDragPreferredTrackId(track.id)
-                          setClipDrag({
-                            clipId: clip.id,
-                            mode: 'move',
-                            originClientX: clientX,
-                            originClientY: clientY,
-                            originTrackId: track.id,
-                            originTimelineStartMs: clip.timelineStartMs,
-                            originSourceInMs: clip.sourceInMs,
-                            originSourceOutMs: clip.sourceOutMs,
-                            linkGroupId: clip.linkGroupId,
-                          })
-                        }}
-                        onPointerDownTrim={(edge, clientX) => {
-                          dragDeltaMsRef.current = 0
-                          dragPreferredTrackIdRef.current = undefined
-                          setDragDeltaMs(0)
-                          setDragPreferredTrackId(undefined)
-                          setClipDrag({
-                            clipId: clip.id,
-                            mode: edge,
-                            originClientX: clientX,
-                            originClientY: 0,
-                            originTrackId: track.id,
-                            originTimelineStartMs: clip.timelineStartMs,
-                            originSourceInMs: clip.sourceInMs,
-                            originSourceOutMs: clip.sourceOutMs,
-                            linkGroupId: clip.linkGroupId,
-                          })
-                        }}
-                      />
-                    )
-                  })}
+                <div className="absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-fb-playhead shadow-[0_0_8px_rgba(255,255,255,0.45)]" />
               </div>
-            ))}
+            </div>
+          </div>
+        </div>
+
+        <div
+          ref={bodyScrollRef}
+          className={`relative min-h-0 min-w-0 flex-1 overflow-auto ${
+            isHandDragging || isClipMoving ? 'cursor-grabbing' : 'cursor-default'
+          }`}
+          onClick={() => {
+            if (suppressClickRef.current) {
+              suppressClickRef.current = false
+              return
+            }
+            selectClip(null)
+          }}
+          onScroll={(event) => {
+            syncHorizontalScroll(event.currentTarget.scrollLeft, 'body')
+          }}
+        >
+          <div
+            className="relative flex bg-fb-surface"
+            style={{
+              width: LABEL_WIDTH + contentWidth,
+              minHeight: Math.max(
+                displayTracks.length * TRACK_HEIGHT,
+                1,
+              ),
+            }}
+          >
+            <div
+              className="sticky left-0 z-20 shrink-0 border-r border-fb-border bg-fb-panel"
+              style={{ width: LABEL_WIDTH }}
+            >
+              {displayTracks.map((track) => (
+                <div
+                  key={track.id}
+                  className="flex items-center gap-2 border-b border-fb-border bg-fb-panel px-2 text-[11px] font-medium text-fb-muted"
+                  style={{ height: TRACK_HEIGHT }}
+                >
+                  {track.kind === 'video' ? (
+                    <Film size={14} strokeWidth={1.6} />
+                  ) : (
+                    <Music2 size={14} strokeWidth={1.6} />
+                  )}
+                  {track.name}
+                </div>
+              ))}
+            </div>
 
             <div
-              className="pointer-events-none absolute inset-y-0 z-20 w-px bg-fb-playhead/80"
-              style={{ left: playheadLeft }}
-              aria-hidden
+              ref={tracksContentRef}
+              className="relative shrink-0 bg-fb-surface"
+              style={{ width: contentWidth }}
             >
-              <div className="absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-fb-playhead shadow-[0_0_8px_rgba(255,255,255,0.45)]" />
+              {displayTracks.map((track) => (
+                <div
+                  key={track.id}
+                  className="relative border-b border-fb-border bg-fb-surface"
+                  style={{ height: TRACK_HEIGHT }}
+                  onPointerDown={(event) => {
+                    if (event.target !== event.currentTarget) return
+                    if (event.button !== 0) return
+                    event.preventDefault()
+                    const viewport = bodyScrollRef.current
+                    if (!viewport) return
+                    panRef.current = {
+                      originClientX: event.clientX,
+                      originClientY: event.clientY,
+                      originScrollLeft: viewport.scrollLeft,
+                      originScrollTop: viewport.scrollTop,
+                      seekClientX: event.clientX,
+                      moved: false,
+                    }
+                  }}
+                >
+                  {document.clips
+                    .filter((clip) => {
+                      const placement = placementByClipId?.get(clip.id)
+                      if (placement) return placement.trackId === track.id
+                      return clip.trackId === track.id
+                    })
+                    .map((clip) => {
+                      const placement = placementByClipId?.get(clip.id)
+                      const isMoving = Boolean(
+                        clipDrag &&
+                          clipDrag.mode === 'move' &&
+                          (clipDrag.clipId === clip.id ||
+                            (Boolean(clipDrag.linkGroupId) &&
+                              clip.linkGroupId === clipDrag.linkGroupId)),
+                      )
+                      return (
+                        <TimelineClipBlock
+                          key={clip.id}
+                          clip={clip}
+                          track={track}
+                          pixelsPerSecond={pixelsPerSecond}
+                          selected={selectedClipIds.includes(clip.id)}
+                          linkedHighlight={
+                            !selectedClipIds.includes(clip.id) &&
+                            clip.linkGroupId != null &&
+                            selectedLinkGroupIds.has(clip.linkGroupId)
+                          }
+                          dragDeltaMs={
+                            clipDrag &&
+                            (clipDrag.clipId === clip.id ||
+                              (Boolean(clipDrag.linkGroupId) &&
+                                clip.linkGroupId === clipDrag.linkGroupId))
+                              ? dragDeltaMs
+                              : 0
+                          }
+                          previewTimelineStartMs={placement?.timelineStartMs}
+                          isMoving={isMoving}
+                          onSelect={(additive) =>
+                            selectClip(clip.id, { additive })
+                          }
+                          onPointerDownMove={(clientX, clientY) => {
+                            dragDeltaMsRef.current = 0
+                            dragPreferredTrackIdRef.current = track.id
+                            setDragDeltaMs(0)
+                            setDragPreferredTrackId(track.id)
+                            setClipDrag({
+                              clipId: clip.id,
+                              mode: 'move',
+                              originClientX: clientX,
+                              originClientY: clientY,
+                              originTrackId: track.id,
+                              originTimelineStartMs: clip.timelineStartMs,
+                              originSourceInMs: clip.sourceInMs,
+                              originSourceOutMs: clip.sourceOutMs,
+                              linkGroupId: clip.linkGroupId,
+                            })
+                          }}
+                          onPointerDownTrim={(edge, clientX) => {
+                            dragDeltaMsRef.current = 0
+                            dragPreferredTrackIdRef.current = undefined
+                            setDragDeltaMs(0)
+                            setDragPreferredTrackId(undefined)
+                            setClipDrag({
+                              clipId: clip.id,
+                              mode: edge,
+                              originClientX: clientX,
+                              originClientY: 0,
+                              originTrackId: track.id,
+                              originTimelineStartMs: clip.timelineStartMs,
+                              originSourceInMs: clip.sourceInMs,
+                              originSourceOutMs: clip.sourceOutMs,
+                              linkGroupId: clip.linkGroupId,
+                            })
+                          }}
+                        />
+                      )
+                    })}
+                </div>
+              ))}
             </div>
+
+            <div
+              className="pointer-events-none absolute inset-y-0 z-40 w-px bg-fb-playhead/80"
+              style={{ left: LABEL_WIDTH + playheadLeft }}
+              aria-hidden
+            />
           </div>
         </div>
       </div>
