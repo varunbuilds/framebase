@@ -2,7 +2,13 @@ import { ALL_FORMATS, BlobSource, Input } from 'mediabunny'
 import type { MediaKind, MediaSource } from '@/types/timeline'
 import { createId } from '@/utils/id'
 import { secondsToMs } from '@/utils/time'
-import { setObjectUrl } from './object-urls'
+import { MediaStoreUnavailableError } from './media-byte-store'
+import {
+  deleteMedia,
+  isPersistentMediaAvailable,
+  saveMedia,
+} from './opfs-media-store'
+import { revokeObjectUrl, setObjectUrl } from './object-urls'
 
 export type ImportMediaResult =
   | { ok: true; source: MediaSource; objectUrl: string }
@@ -128,10 +134,21 @@ export async function importLocalMediaFile(file: File): Promise<ImportMediaResul
       error: `"${file.name}" is not a supported video or audio file.`,
     }
   }
+  if (!isPersistentMediaAvailable()) {
+    return {
+      ok: false,
+      error:
+        'This browser cannot store imported media on this device, so it would disappear after a refresh.',
+    }
+  }
 
+  const id = createId('media')
   try {
     const probed = await probeWithMediabunny(file)
-    const id = createId('media')
+    await saveMedia(id, file, {
+      name: file.name,
+      mimeType: file.type || probed.mimeType || 'application/octet-stream',
+    })
     const objectUrl = URL.createObjectURL(file)
     setObjectUrl(id, objectUrl)
 
@@ -147,16 +164,29 @@ export async function importLocalMediaFile(file: File): Promise<ImportMediaResul
       height: probed.height,
       sampleRate: probed.sampleRate,
       channelCount: probed.channelCount,
-      locator: { kind: 'runtime' },
+      locator: { kind: 'opfs', key: id },
       availability: 'available',
       importedAt: new Date().toISOString(),
     }
 
     return { ok: true, source, objectUrl }
   } catch (error) {
+    await deleteMedia(id).catch(() => undefined)
     const message =
-      error instanceof Error ? error.message : 'Failed to import media file.'
+      error instanceof MediaStoreUnavailableError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : 'Failed to import media file.'
     return { ok: false, error: `Could not import "${file.name}": ${message}` }
+  }
+}
+
+/** Drops a source that was stored but never added to the document. */
+export async function discardImportedMedia(source: MediaSource): Promise<void> {
+  revokeObjectUrl(source.id)
+  if (source.locator.kind === 'opfs') {
+    await deleteMedia(source.locator.key).catch(() => undefined)
   }
 }
 

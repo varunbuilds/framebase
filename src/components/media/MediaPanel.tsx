@@ -1,6 +1,6 @@
 import { Film, Music2, Plus, Trash2 } from 'lucide-react'
 import { useRef, useState } from 'react'
-import { importLocalMediaFile, MEDIA_ACCEPT } from '@/lib/media/import'
+import { discardImportedMedia, importLocalMediaFile, MEDIA_ACCEPT } from '@/lib/media/import'
 import { beginMediaDrag, endMediaDrag } from '@/lib/media/media-drag'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { useEditorStore } from '@/stores/editor-store'
@@ -80,7 +80,9 @@ export function MediaPanel() {
         setImportError(result.error)
         continue
       }
-      registerMediaSource(result.source)
+      if (!registerMediaSource(result.source)) {
+        await discardImportedMedia(result.source)
+      }
     }
 
     setImportStatus('idle')
@@ -284,6 +286,11 @@ export function MediaPanel() {
                       {source.availability === 'missing' && !objectUrl && (
                         <span className="mt-1 block truncate px-0.5 text-[10px] text-fb-subtle">
                           Unavailable on this device
+                        </span>
+                      )}
+                      {source.availability === 'error' && (
+                        <span className="mt-1 block truncate px-0.5 text-[10px] text-fb-danger">
+                          Could not read this file
                         </span>
                       )}
                       <span className="mt-1.5 flex items-center gap-1 truncate px-0.5 text-[11px] font-medium text-fb-text">

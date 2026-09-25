@@ -37,8 +37,21 @@ describe('project documents for persistence', () => {
     expect(record.row.document.version).toBe(1)
     expect(record.row.document.document.clips).toEqual([])
     expect(record.row.document.document.tracks).toHaveLength(2)
+    expect(record.row.document.document.canvas).toEqual({ aspectRatio: '16:9' })
     expect(JSON.stringify(record.row.document)).not.toContain('owner_id')
     expect(JSON.stringify(record.row.document)).not.toContain('blob:')
+  })
+
+  it('stores the selected aspect ratio on the document', () => {
+    const record = buildNewProjectRecord({
+      ownerId,
+      name: '  Vertical  ',
+      aspectRatio: '9:16',
+    })
+    expect(record.row.name).toBe('Vertical')
+    expect(record.row.document.document.canvas.aspectRatio).toBe('9:16')
+    const loaded = readStoredProject(record.row.document, record.row.id)
+    expect(loaded.canvas.aspectRatio).toBe('9:16')
   })
 
   it('serializes runtime media as known and drops non-document fields', () => {
@@ -52,6 +65,23 @@ describe('project documents for persistence', () => {
     }
     const payload = durableProjectPayload(withRuntime as ProjectDocument)
     expect(payload.document.mediaSources[0]?.availability).toBe('known')
+    expect(JSON.stringify(payload)).not.toContain('blob:')
+    expect(JSON.stringify(payload)).not.toContain('objectUrl')
+  })
+
+  it('keeps an OPFS locator and does not store file bytes', () => {
+    const document = sampleDocument()
+    document.mediaSources = [
+      {
+        ...document.mediaSources[0]!,
+        locator: { kind: 'opfs', key: 'media_1' },
+        availability: 'available',
+      },
+    ]
+    const payload = durableProjectPayload(document)
+    const source = payload.document.mediaSources[0]
+    expect(source?.locator).toEqual({ kind: 'opfs', key: 'media_1' })
+    expect(source?.availability).toBe('known')
     expect(JSON.stringify(payload)).not.toContain('blob:')
     expect(JSON.stringify(payload)).not.toContain('objectUrl')
   })

@@ -1,7 +1,15 @@
 import { getRouteApi, Link, useNavigate, useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
+import { NewProjectDialog } from '@/components/projects/NewProjectDialog'
 import { useAuth } from '@/features/auth/use-auth'
-import { createProject, deleteProject } from '@/features/projects/repository'
+import { releaseProjectMedia } from '@/lib/media/release-project-media'
+import {
+  createProject,
+  deleteProject,
+  fetchProject,
+  ProjectNotFoundError,
+} from '@/features/projects/repository'
+import type { CanvasAspectRatio, ProjectDocument } from '@/types/timeline'
 const projectsRoute = getRouteApi('/authenticated/projects')
 
 function formatUpdated(value: string): string {
@@ -23,19 +31,23 @@ export function ProjectsPage() {
   const [removedIds, setRemovedIds] = useState<string[]>([])
   const projects = loaded.filter((project) => !removedIds.includes(project.id))
   const [creating, setCreating] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  const onCreate = async () => {
-    if (!user) return
+  const onCreate = async (project: {
+    name: string
+    aspectRatio: CanvasAspectRatio
+  }) => {
+    if (!user || creating) return
     setCreating(true)
     setError(null)
     try {
-      const project = await createProject(user.id)
+      const created = await createProject(user.id, project)
       await navigate({
         to: '/editor/$projectId',
-        params: { projectId: project.id },
+        params: { projectId: created.id },
       })
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not create project.')
@@ -47,7 +59,14 @@ export function ProjectsPage() {
     setDeletingId(projectId)
     setError(null)
     try {
+      let document: ProjectDocument | null = null
+      try {
+        document = (await fetchProject(projectId)).document
+      } catch (caught) {
+        if (caught instanceof ProjectNotFoundError) throw caught
+      }
       await deleteProject(projectId)
+      if (document) await releaseProjectMedia(document)
       setRemovedIds((current) => [...current, projectId])
       setConfirmingId(null)
       await router.invalidate()
@@ -98,11 +117,13 @@ export function ProjectsPage() {
           </div>
           <button
             type="button"
-            onClick={() => void onCreate()}
-            disabled={creating}
-            className="h-9 rounded-md bg-white px-3 text-[13px] font-medium text-black disabled:opacity-50"
+            onClick={() => {
+              setError(null)
+              setDialogOpen(true)
+            }}
+            className="h-9 rounded-md bg-white px-3 text-[13px] font-medium text-black"
           >
-            {creating ? 'Creating…' : 'New Project'}
+            New Project
           </button>
         </div>
 
@@ -167,6 +188,16 @@ export function ProjectsPage() {
           </ul>
         )}
       </div>
+      {dialogOpen && (
+        <NewProjectDialog
+          creating={creating}
+          onCancel={() => {
+            if (creating) return
+            setDialogOpen(false)
+          }}
+          onCreate={(project) => void onCreate(project)}
+        />
+      )}
     </main>
   )
 }

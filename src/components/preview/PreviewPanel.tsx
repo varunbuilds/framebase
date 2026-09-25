@@ -59,6 +59,8 @@ function PreviewGap() {
 }
 
 export function PreviewPanel() {
+  const aspectRatio = useEditorStore((state) => state.document.canvas.aspectRatio)
+  const [frameWidth, frameHeight] = aspectRatio.split(':').map(Number)
   const timelineDurationMs = useEditorStore((state) =>
     getPlaybackEndMs(state.document),
   )
@@ -120,8 +122,8 @@ export function PreviewPanel() {
         <div
           className="relative overflow-hidden border border-fb-border-strong bg-[#181e22] shadow-[inset_0_1px_0_rgba(255,255,255,0.06),inset_0_0_48px_rgba(0,0,0,0.55)]"
           style={{
-            aspectRatio: '16 / 9',
-            width: 'min(100%, 760px, calc(min(460px, 100cqh) * 16 / 9))',
+            aspectRatio: `${frameWidth} / ${frameHeight}`,
+            width: `min(100%, 760px, calc(min(460px, 100cqh) * ${frameWidth} / ${frameHeight}))`,
             maxHeight: 'min(460px, 100%)',
           }}
         >

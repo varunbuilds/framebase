@@ -1,5 +1,5 @@
 import { createEmptyProject, deserializeProject } from '@/features/editor/project'
-import type { MediaSource, ProjectDocument } from '@/types/timeline'
+import type { CanvasAspectRatio, MediaSource, ProjectDocument } from '@/types/timeline'
 
 const PROJECT_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -33,6 +33,9 @@ export function durableProjectPayload(
 }
 
 function durableMediaSource(source: MediaSource): MediaSource {
+  if (source.locator.kind === 'opfs') {
+    return { ...source, availability: 'known' }
+  }
   if (source.locator.kind === 'runtime' && source.availability === 'available') {
     return { ...source, availability: 'known' }
   }
@@ -74,6 +77,7 @@ export function buildNewProjectRecord(args: {
   ownerId: string
   name?: string
   id?: string
+  aspectRatio?: CanvasAspectRatio
 }): {
   ownerId: string
   row: {
@@ -88,7 +92,9 @@ export function buildNewProjectRecord(args: {
   }
   const id = args.id ?? crypto.randomUUID()
   if (!isProjectId(id)) throw new Error('Project id must be a UUID')
-  const document = createEmptyProject(args.name ?? 'Untitled Project', id)
+  const name = (args.name ?? 'Untitled Project').trim()
+  if (!name) throw new Error('Project name is required')
+  const document = createEmptyProject(name, id, args.aspectRatio ?? '16:9')
   return {
     ownerId: args.ownerId,
     row: {

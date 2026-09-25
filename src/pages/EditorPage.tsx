@@ -1,8 +1,8 @@
 import { getRouteApi, Link } from '@tanstack/react-router'
-import { useLayoutEffect } from 'react'
+import { useEffect } from 'react'
 import { EditorShell } from '@/components/layout/EditorShell'
-import { getObjectUrl } from '@/lib/media/object-urls'
-import { prepareLoadedDocument } from '@/features/projects/document'
+import { hydrateDocumentMedia } from '@/lib/media/hydrate-project-media'
+import { revokeObjectUrl } from '@/lib/media/object-urls'
 import { useProjectAutosave } from '@/features/projects/use-project-autosave'
 import { useEditorStore } from '@/stores/editor-store'
 const editorRoute = getRouteApi('/authenticated/editor/$projectId')
@@ -20,11 +20,20 @@ export function EditorPage() {
   const documentId = useEditorStore((state) => state.document.id)
   const loadDocument = useEditorStore((state) => state.loadDocument)
 
-  useLayoutEffect(() => {
-    const prepared = prepareLoadedDocument(project.document, (mediaSourceId) =>
-      Boolean(getObjectUrl(mediaSourceId)),
-    )
-    loadDocument(prepared, project.updatedAt)
+  useEffect(() => {
+    let cancelled = false
+    void hydrateDocumentMedia(project.document).then((hydrated) => {
+      if (cancelled) {
+        for (const mediaSourceId of hydrated.attachedIds) {
+          revokeObjectUrl(mediaSourceId)
+        }
+        return
+      }
+      loadDocument(hydrated.document, project.updatedAt)
+    })
+    return () => {
+      cancelled = true
+    }
   }, [loadDocument, project])
 
   if (documentId !== project.id) return <OpeningProject />

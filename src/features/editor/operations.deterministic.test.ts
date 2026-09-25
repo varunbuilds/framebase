@@ -7,6 +7,7 @@ function document(): ProjectDocument {
   return {
     id: 'project_1',
     name: 'Test',
+    canvas: { aspectRatio: '16:9' },
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     tracks: [

@@ -1,5 +1,5 @@
 import { getSupabase } from '@/lib/supabase/client'
-import type { ProjectDocument } from '@/types/timeline'
+import type { CanvasAspectRatio, ProjectDocument } from '@/types/timeline'
 import {
   buildNewProjectRecord,
   durableProjectPayload,
@@ -50,9 +50,13 @@ export async function listProjects(): Promise<ProjectSummary[]> {
 
 export async function createProject(
   ownerId: string,
-  name = 'Untitled Project',
+  options: { name?: string; aspectRatio?: CanvasAspectRatio } = {},
 ): Promise<StoredProject> {
-  const record = buildNewProjectRecord({ ownerId, name })
+  const record = buildNewProjectRecord({
+    ownerId,
+    name: options.name,
+    aspectRatio: options.aspectRatio,
+  })
   const { data, error } = await getSupabase()
     .from('projects')
     .insert(record.row)

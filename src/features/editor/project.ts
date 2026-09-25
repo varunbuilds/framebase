@@ -1,9 +1,11 @@
 import type {
+  CanvasAspectRatio,
   Clip,
   MediaAvailability,
   MediaKind,
   MediaLocator,
   MediaSource,
+  ProjectCanvas,
   ProjectDocument,
   Track,
   TrackKind,
@@ -34,11 +36,13 @@ export function createDefaultTracks(): Track[] {
 export function createEmptyProject(
   name = 'Untitled Project',
   id = createId('project'),
+  aspectRatio: CanvasAspectRatio = '16:9',
 ): ProjectDocument {
   const now = new Date().toISOString()
   return {
     id,
     name,
+    canvas: { aspectRatio },
     tracks: createDefaultTracks(),
     clips: [],
     mediaSources: [],
@@ -51,6 +55,7 @@ export function createEmptyProject(
 export const unloadedProject: ProjectDocument = {
   id: 'unloaded',
   name: 'Untitled Project',
+  canvas: { aspectRatio: '16:9' },
   tracks: [],
   clips: [],
   mediaSources: [],
@@ -81,6 +86,7 @@ function withoutUpdatedAt(
   return {
     id: document.id,
     name: document.name,
+    canvas: document.canvas,
     tracks: document.tracks,
     clips: document.clips,
     mediaSources: document.mediaSources,
@@ -176,6 +182,7 @@ function toSerializableDocument(document: ProjectDocument): ProjectDocument {
   return {
     id: document.id,
     name: document.name,
+    canvas: { aspectRatio: document.canvas.aspectRatio },
     tracks: document.tracks.map(toSerializableTrack),
     clips: document.clips.map(toSerializableClip),
     mediaSources: document.mediaSources.map(toSerializableMedia),
@@ -268,7 +275,30 @@ function validateSerializableProject(parsed: unknown): ProjectDocument {
     }
   }
 
-  return { id, name, tracks, clips, mediaSources, createdAt, updatedAt }
+  return {
+    id,
+    name,
+    canvas: validateCanvas(document.canvas),
+    tracks,
+    clips,
+    mediaSources,
+    createdAt,
+    updatedAt,
+  }
+}
+
+function validateCanvas(value: unknown): ProjectCanvas {
+  if (value == null) return { aspectRatio: '16:9' }
+  const canvas = asRecord(value, 'Invalid canvas')
+  const aspectRatio = canvas.aspectRatio
+  if (!isCanvasAspectRatio(aspectRatio)) {
+    throw new Error('Invalid canvas aspect ratio')
+  }
+  return { aspectRatio }
+}
+
+function isCanvasAspectRatio(value: unknown): value is CanvasAspectRatio {
+  return value === '16:9' || value === '9:16' || value === '1:1' || value === '4:3'
 }
 
 function validateTrack(value: unknown): Track {

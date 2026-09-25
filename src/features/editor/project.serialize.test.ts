@@ -10,6 +10,7 @@ function sample(): ProjectDocument {
   return {
     id: 'project_1',
     name: 'Cut',
+    canvas: { aspectRatio: '16:9' },
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-02T00:00:00.000Z',
     tracks: [
@@ -76,6 +77,23 @@ describe('project serialization', () => {
     expect(() => deserializeProject(serializeProject(broken))).toThrow(
       /missing media source/,
     )
+  })
+
+  it('defaults a missing canvas to 16:9', () => {
+    const parsed = JSON.parse(serializeProject(sample())) as {
+      document: { canvas?: unknown }
+    }
+    delete parsed.document.canvas
+    const restored = deserializeProject(JSON.stringify(parsed))
+    expect(restored.canvas).toEqual({ aspectRatio: '16:9' })
+  })
+
+  it('rejects an invalid aspect ratio', () => {
+    const parsed = JSON.parse(serializeProject(sample())) as {
+      document: { canvas: { aspectRatio: string } }
+    }
+    parsed.document.canvas.aspectRatio = '21:9'
+    expect(() => deserializeProject(JSON.stringify(parsed))).toThrow(/aspect ratio/)
   })
 
   it('rejects an unsupported version', () => {

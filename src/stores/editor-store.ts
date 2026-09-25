@@ -22,10 +22,17 @@ import {
   unloadedProject,
 } from '@/features/editor/project'
 import { clearFilmstripFramesForObjectUrl } from '@/lib/media/filmstrip-cache'
+import { deleteMedia } from '@/lib/media/opfs-media-store'
 import { getObjectUrl, revokeObjectUrl } from '@/lib/media/object-urls'
 import { clearWaveformPeaks } from '@/lib/media/waveform'
 import type { ClipDragState, EditorUiState } from '@/types/editor'
 import type { MediaSource, ProjectDocument, TimeMs } from '@/types/timeline'
+
+function documentUsesOpfsKey(document: ProjectDocument, key: string): boolean {
+  return document.mediaSources.some(
+    (source) => source.locator.kind === 'opfs' && source.locator.key === key,
+  )
+}
 import { clamp } from '@/utils/time'
 
 interface EditorActions {
@@ -360,6 +367,9 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
   },
 
   unregisterMediaSource: (mediaSourceId) => {
+    const removed = get().document.mediaSources.find(
+      (source) => source.id === mediaSourceId,
+    )
     const temporal = useEditorStore.temporal.getState()
     temporal.pause()
     const result = removeMediaSource(get().document, mediaSourceId)
@@ -386,6 +396,18 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
       },
     })
     temporal.resume()
+    if (removed?.locator.kind === 'opfs') {
+      const key = removed.locator.key
+      const history = useEditorStore.temporal.getState()
+      const snapshots = [
+        get().document,
+        ...history.pastStates.map((state) => state.document),
+        ...history.futureStates.map((state) => state.document),
+      ].filter((document): document is ProjectDocument => document != null)
+      if (!snapshots.some((document) => documentUsesOpfsKey(document, key))) {
+        void deleteMedia(key).catch(() => undefined)
+      }
+    }
     return true
   },
 

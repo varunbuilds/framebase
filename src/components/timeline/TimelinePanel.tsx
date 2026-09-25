@@ -31,7 +31,7 @@ import {
   setFilmstripFrame,
 } from '@/lib/media/filmstrip-cache'
 import { getObjectUrl } from '@/lib/media/object-urls'
-import { importLocalMediaFile } from '@/lib/media/import'
+import { discardImportedMedia, importLocalMediaFile } from '@/lib/media/import'
 import {
   draggingMediaSourceId,
   draggingMediaSourceIds,
@@ -1074,7 +1074,10 @@ export function TimelinePanel() {
             setImportError(result.error)
             continue
           }
-          registerMediaSource(result.source)
+          if (!registerMediaSource(result.source)) {
+            await discardImportedMedia(result.source)
+            continue
+          }
           addClip(result.source.id, startMs, target.trackId)
           startMs += result.source.durationMs
         }

@@ -44,6 +44,7 @@ function project(parts: {
   return {
     id: 'project_1',
     name: 'Test',
+    canvas: { aspectRatio: '16:9' },
     tracks: parts.tracks,
     clips: parts.clips,
     mediaSources: parts.mediaSources,

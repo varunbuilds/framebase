@@ -3,6 +3,15 @@ export type TimeMs = number
 
 export type MediaKind = 'video' | 'audio'
 
+export const CANVAS_ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3'] as const
+
+export type CanvasAspectRatio = (typeof CANVAS_ASPECT_RATIOS)[number]
+
+/** Persistent preview frame. Not a rendered pixel buffer. */
+export interface ProjectCanvas {
+  aspectRatio: CanvasAspectRatio
+}
+
 export type TrackKind = 'video' | 'audio'
 
 /**
@@ -80,6 +89,7 @@ export interface Clip {
 export interface ProjectDocument {
   id: string
   name: string
+  canvas: ProjectCanvas
   tracks: Track[]
   clips: Clip[]
   mediaSources: MediaSource[]

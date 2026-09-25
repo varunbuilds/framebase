@@ -1,9 +1,11 @@
 export type {
+  CanvasAspectRatio,
   Clip,
   MediaAvailability,
   MediaKind,
   MediaLocator,
   MediaSource,
+  ProjectCanvas,
   ProjectDocument,
   SerializableProject,
   TimeMs,
