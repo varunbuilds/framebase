@@ -1,8 +1,11 @@
 import { getRouteApi, Link } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { EditorShell } from '@/components/layout/EditorShell'
-import { hydrateDocumentMedia } from '@/lib/media/hydrate-project-media'
-import { revokeObjectUrl } from '@/lib/media/object-urls'
+import {
+  commitHydratedDocument,
+  hydrateDocumentMediaOnce,
+} from '@/lib/media/hydrate-project-media'
+import { revokeObjectUrlsExcept } from '@/lib/media/object-urls'
 import { useProjectAutosave } from '@/features/projects/use-project-autosave'
 import { useEditorStore } from '@/stores/editor-store'
 const editorRoute = getRouteApi('/authenticated/editor/$projectId')
@@ -19,22 +22,26 @@ export function EditorPage() {
   const project = editorRoute.useLoaderData()
   const documentId = useEditorStore((state) => state.document.id)
   const loadDocument = useEditorStore((state) => state.loadDocument)
+  const { id: projectId, document: storedDocument, updatedAt } = project
 
   useEffect(() => {
-    let cancelled = false
-    void hydrateDocumentMedia(project.document).then((hydrated) => {
-      if (cancelled) {
-        for (const mediaSourceId of hydrated.attachedIds) {
-          revokeObjectUrl(mediaSourceId)
-        }
-        return
-      }
-      loadDocument(hydrated.document, project.updatedAt)
+    let active = true
+    void hydrateDocumentMediaOnce(storedDocument).then((hydrated) => {
+      commitHydratedDocument({
+        active,
+        hydrated: hydrated.document,
+        load: (document) => {
+          revokeObjectUrlsExcept(
+            new Set(document.mediaSources.map((source) => source.id)),
+          )
+          loadDocument(document, updatedAt)
+        },
+      })
     })
     return () => {
-      cancelled = true
+      active = false
     }
-  }, [loadDocument, project])
+  }, [loadDocument, projectId, storedDocument, updatedAt])
 
   if (documentId !== project.id) return <OpeningProject />
 

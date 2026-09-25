@@ -22,6 +22,19 @@ export function revokeObjectUrl(mediaSourceId: string): void {
   }
 }
 
+/** Revoke only when this call still owns the registered URL. */
+export function revokeObjectUrlIfCurrent(mediaSourceId: string, url: string): boolean {
+  if (getObjectUrl(mediaSourceId) !== url) return false
+  revokeObjectUrl(mediaSourceId)
+  return true
+}
+
+export function revokeObjectUrlsExcept(keep: ReadonlySet<string>): void {
+  for (const mediaSourceId of [...objectUrls.keys()]) {
+    if (!keep.has(mediaSourceId)) revokeObjectUrl(mediaSourceId)
+  }
+}
+
 export function revokeAllObjectUrls(): void {
   for (const url of objectUrls.values()) {
     URL.revokeObjectURL(url)
