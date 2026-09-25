@@ -28,7 +28,7 @@ interface EditorActions {
     clipId: string | null,
     options?: { additive?: boolean },
   ) => void
-  selectMediaSource: (mediaSourceId: string | null) => void
+  selectMediaSource: (mediaSourceIds: string[]) => void
   setPlayheadMs: (ms: TimeMs) => void
   seekTo: (ms: TimeMs) => void
   play: () => void
@@ -73,7 +73,7 @@ export type EditorStore = {
 
 const initialUi: EditorUiState = {
   selectedClipIds: [],
-  selectedMediaSourceId: null,
+  selectedMediaSourceIds: [],
   playheadMs: 0,
   isPlaying: false,
   seekVersion: 0,
@@ -139,11 +139,11 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     })
   },
 
-  selectMediaSource: (mediaSourceId) => {
+  selectMediaSource: (mediaSourceIds) => {
     set({
       ui: {
         ...get().ui,
-        selectedMediaSourceId: mediaSourceId,
+        selectedMediaSourceIds: mediaSourceIds,
       },
     })
   },
@@ -298,7 +298,6 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
       document: result.document,
       ui: {
         ...get().ui,
-        selectedMediaSourceId: source.id,
         importError: null,
         saveStatus: 'unsaved',
       },
@@ -322,10 +321,9 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
       document: result.document,
       ui: {
         ...ui,
-        selectedMediaSourceId:
-          ui.selectedMediaSourceId === mediaSourceId
-            ? null
-            : ui.selectedMediaSourceId,
+        selectedMediaSourceIds: ui.selectedMediaSourceIds.filter(
+          (id) => id !== mediaSourceId,
+        ),
         selectedClipIds: ui.selectedClipIds.filter((id) =>
           result.document.clips.some((clip) => clip.id === id),
         ),

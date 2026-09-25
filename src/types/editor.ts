@@ -2,7 +2,8 @@ import type { Clip, ProjectDocument, TimeMs } from './timeline'
 
 export interface EditorUiState {
   selectedClipIds: string[]
-  selectedMediaSourceId: string | null
+  /** Library selection, in the order items were selected. */
+  selectedMediaSourceIds: string[]
   playheadMs: TimeMs
   isPlaying: boolean
   /** Bumped on explicit seeks so the playback loop adopts the new playhead. */

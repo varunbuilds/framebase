@@ -1,14 +1,28 @@
 import { Film, Music2, Plus, Trash2 } from 'lucide-react'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { importLocalMediaFile, MEDIA_ACCEPT } from '@/lib/media/import'
 import { beginMediaDrag, endMediaDrag } from '@/lib/media/media-drag'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { useEditorStore } from '@/stores/editor-store'
 
+const MARQUEE_SLOP_PX = 4
+
+function rectsIntersect(
+  item: DOMRect,
+  marquee: { left: number; top: number; right: number; bottom: number },
+) {
+  return (
+    item.left < marquee.right &&
+    item.right > marquee.left &&
+    item.top < marquee.bottom &&
+    item.bottom > marquee.top
+  )
+}
+
 export function MediaPanel() {
   const mediaSources = useEditorStore((state) => state.document.mediaSources)
-  const selectedMediaSourceId = useEditorStore(
-    (state) => state.ui.selectedMediaSourceId,
+  const selectedMediaSourceIds = useEditorStore(
+    (state) => state.ui.selectedMediaSourceIds,
   )
   const importError = useEditorStore((state) => state.ui.importError)
   const importStatus = useEditorStore((state) => state.ui.importStatus)
@@ -21,6 +35,39 @@ export function MediaPanel() {
   const setImportError = useEditorStore((state) => state.setImportError)
   const setImportStatus = useEditorStore((state) => state.setImportStatus)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const itemRefs = useRef(new Map<string, HTMLLIElement>())
+  const anchorIdRef = useRef<string | null>(null)
+  const marqueeSessionRef = useRef<{
+    pointerId: number
+    originX: number
+    originY: number
+    additive: boolean
+    base: string[]
+    moved: boolean
+  } | null>(null)
+  const [marquee, setMarquee] = useState<{
+    left: number
+    top: number
+    width: number
+    height: number
+  } | null>(null)
+
+  const panelOrder = (ids: Iterable<string>) => {
+    const wanted = new Set(ids)
+    return mediaSources
+      .map((source) => source.id)
+      .filter((id) => wanted.has(id))
+  }
+
+  const sameSelection = (next: string[]) =>
+    next.length === selectedMediaSourceIds.length &&
+    next.every((id, index) => id === selectedMediaSourceIds[index])
+
+  const applySelection = (next: string[]) => {
+    if (sameSelection(next)) return
+    selectMediaSource(next)
+  }
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return
@@ -38,6 +85,98 @@ export function MediaPanel() {
 
     setImportStatus('idle')
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const onPanelPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    const target = event.target as HTMLElement
+    if (target.closest('[data-media-item]')) return
+    const additive = event.metaKey || event.ctrlKey || event.shiftKey
+    marqueeSessionRef.current = {
+      pointerId: event.pointerId,
+      originX: event.clientX,
+      originY: event.clientY,
+      additive,
+      base: additive ? selectedMediaSourceIds : [],
+      moved: false,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const onPanelPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const session = marqueeSessionRef.current
+    if (!session || event.pointerId !== session.pointerId) return
+    const dx = event.clientX - session.originX
+    const dy = event.clientY - session.originY
+    if (!session.moved && Math.hypot(dx, dy) < MARQUEE_SLOP_PX) return
+    session.moved = true
+
+    const bounds = {
+      left: Math.min(session.originX, event.clientX),
+      top: Math.min(session.originY, event.clientY),
+      right: Math.max(session.originX, event.clientX),
+      bottom: Math.max(session.originY, event.clientY),
+    }
+    const hits: string[] = []
+    for (const [id, element] of itemRefs.current) {
+      if (rectsIntersect(element.getBoundingClientRect(), bounds)) hits.push(id)
+    }
+    const orderedHits = panelOrder(hits)
+    const seen = new Set(session.base)
+    applySelection(
+      session.additive
+        ? [...session.base, ...orderedHits.filter((id) => !seen.has(id))]
+        : orderedHits,
+    )
+
+    const host = panelRef.current
+    if (!host) return
+    const hostBounds = host.getBoundingClientRect()
+    setMarquee({
+      left: bounds.left - hostBounds.left + host.scrollLeft,
+      top: bounds.top - hostBounds.top + host.scrollTop,
+      width: bounds.right - bounds.left,
+      height: bounds.bottom - bounds.top,
+    })
+  }
+
+  const endMarquee = (event: React.PointerEvent<HTMLDivElement>) => {
+    const session = marqueeSessionRef.current
+    if (!session || event.pointerId !== session.pointerId) return
+    if (!session.moved && !session.additive) {
+      applySelection([])
+      anchorIdRef.current = null
+    }
+    marqueeSessionRef.current = null
+    setMarquee(null)
+  }
+
+  const onItemClick = (
+    event: React.MouseEvent<HTMLButtonElement>,
+    id: string,
+  ) => {
+    if (event.metaKey || event.ctrlKey) {
+      const next = selectedMediaSourceIds.includes(id)
+        ? selectedMediaSourceIds.filter((item) => item !== id)
+        : [...selectedMediaSourceIds, id]
+      applySelection(next)
+      anchorIdRef.current = id
+      return
+    }
+
+    if (event.shiftKey && anchorIdRef.current) {
+      const ids = mediaSources.map((source) => source.id)
+      const start = ids.indexOf(anchorIdRef.current)
+      const end = ids.indexOf(id)
+      if (start >= 0 && end >= 0) {
+        const [from, to] = start < end ? [start, end] : [end, start]
+        applySelection(ids.slice(from, to + 1))
+        return
+      }
+    }
+
+    applySelection([id])
+    anchorIdRef.current = id
   }
 
   return (
@@ -66,7 +205,14 @@ export function MediaPanel() {
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-none p-2">
+      <div
+        ref={panelRef}
+        className="relative min-h-0 flex-1 overflow-y-auto overscroll-none p-2"
+        onPointerDown={onPanelPointerDown}
+        onPointerMove={onPanelPointerMove}
+        onPointerUp={endMarquee}
+        onPointerCancel={endMarquee}
+      >
         {mediaSources.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center">
             <Film size={20} className="text-fb-subtle" strokeWidth={1.5} />
@@ -76,30 +222,44 @@ export function MediaPanel() {
             </p>
           </div>
         ) : (
-          <ul className="grid grid-cols-2 gap-3">
+          <ul className="grid grid-cols-2 gap-3 select-none">
             {mediaSources.map((source) => {
-              const selected = source.id === selectedMediaSourceId
+              const selected = selectedMediaSourceIds.includes(source.id)
               const objectUrl = getObjectUrl(source.id)
               return (
-                <li key={source.id}>
+                <li
+                  key={source.id}
+                  data-media-item
+                  ref={(node) => {
+                    if (node) itemRefs.current.set(source.id, node)
+                    else itemRefs.current.delete(source.id)
+                  }}
+                >
                   <div
                     className={`group relative rounded-md border p-1 ${
                       selected
-                        ? 'border-fb-accent/60 bg-fb-accent-soft'
-                        : 'border-transparent hover:border-fb-border hover:bg-white/[0.04]'
+                        ? 'border-fb-accent/70 bg-fb-accent-soft'
+                        : 'border-transparent'
                     }`}
                   >
                     <button
                       type="button"
                       draggable
                       onDragStart={(event) => {
-                        beginMediaDrag(source.id, event.dataTransfer)
+                        const ids = selectedMediaSourceIds.includes(source.id)
+                          ? selectedMediaSourceIds
+                          : [source.id]
+                        if (!selectedMediaSourceIds.includes(source.id)) {
+                          selectMediaSource([source.id])
+                          anchorIdRef.current = source.id
+                        }
+                        beginMediaDrag(ids, event.dataTransfer)
                       }}
                       onDragEnd={() => endMediaDrag()}
-                      onClick={() => selectMediaSource(source.id)}
+                      onClick={(event) => onItemClick(event, source.id)}
                       onDoubleClick={() => addClip(source.id)}
-                      title="Drag onto the timeline, or double-click to append"
-                      className="block w-full cursor-grab text-left active:cursor-grabbing"
+                      title="Click to select. Command-click or drag a box to select more, then drag the group onto the timeline."
+                      className="block w-full cursor-default text-left"
                     >
                       <span className="relative block aspect-video overflow-hidden rounded-[5px] border border-white/[0.08] bg-[#181e22]">
                         {source.kind === 'video' && objectUrl ? (
@@ -148,6 +308,17 @@ export function MediaPanel() {
               )
             })}
           </ul>
+        )}
+        {marquee && (
+          <div
+            className="pointer-events-none absolute z-10 border border-fb-accent/80 bg-fb-accent/15"
+            style={{
+              left: marquee.left,
+              top: marquee.top,
+              width: marquee.width,
+              height: marquee.height,
+            }}
+          />
         )}
       </div>
 

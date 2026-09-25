@@ -26,9 +26,10 @@ import { getObjectUrl } from '@/lib/media/object-urls'
 import { importLocalMediaFile } from '@/lib/media/import'
 import {
   draggingMediaSourceId,
+  draggingMediaSourceIds,
   endMediaDrag,
   isLibraryMediaDrag,
-  libraryMediaIdFromDrop,
+  libraryMediaIdsFromDrop,
 } from '@/lib/media/media-drag'
 import type { Clip, Track } from '@/types/timeline'
 import { clamp, formatFrameClock, formatSignedFrameClock, formatTimecode, FRAME_DURATION_MS, snapToFrameMs } from '@/utils/time'
@@ -553,7 +554,7 @@ export function TimelinePanel() {
   const [viewportWidth, setViewportWidth] = useState(0)
   const [hoverFrameMs, setHoverFrameMs] = useState<number | null>(null)
   const [mediaDrop, setMediaDrop] = useState<{
-    mediaSourceId: string | null
+    mediaSourceIds: string[]
     timelineStartMs: number
     trackId?: string
     fileDrop: boolean
@@ -614,20 +615,58 @@ export function TimelinePanel() {
   }, [clipDrag, document, dragDeltaMs, dragPreferredTrackId])
 
   const dropPlan = useMemo(() => {
-    if (!mediaDrop?.mediaSourceId) {
+    const ids = mediaDrop?.mediaSourceIds ?? []
+    if (ids.length === 0) {
       dropPlanSeedRef.current = undefined
       return null
     }
-    const plan = planMediaDrop({
-      document,
-      mediaSourceId: mediaDrop.mediaSourceId,
-      timelineStartMs: mediaDrop.timelineStartMs,
-      trackId: mediaDrop.trackId,
-      seedTracks: dropPlanSeedRef.current,
-    })
-    if ('error' in plan) return null
-    dropPlanSeedRef.current = plan.tracks
-    return plan
+
+    let working = document
+    let seedTracks = dropPlanSeedRef.current
+    let startMs = mediaDrop!.timelineStartMs
+    let trackId = mediaDrop!.trackId
+    const placements: Array<{
+      role: 'video' | 'audio'
+      trackId: string
+      timelineStartMs: number
+      durationMs: number
+    }> = []
+
+    for (const mediaSourceId of ids) {
+      const plan = planMediaDrop({
+        document: working,
+        mediaSourceId,
+        timelineStartMs: startMs,
+        trackId,
+        seedTracks,
+      })
+      if ('error' in plan) break
+      seedTracks = plan.tracks
+      const follow =
+        plan.placements.find((item) => item.trackId === trackId) ??
+        plan.placements[0]
+      if (!follow) break
+      placements.push(...plan.placements)
+      const placedClips = plan.placements.map((item, index) => ({
+        id: `drop-${mediaSourceId}-${index}`,
+        mediaSourceId,
+        trackId: item.trackId,
+        timelineStartMs: item.timelineStartMs,
+        sourceInMs: 0,
+        sourceOutMs: item.durationMs,
+      }))
+      working = {
+        ...working,
+        tracks: plan.tracks,
+        clips: [...working.clips, ...placedClips],
+      }
+      startMs = follow.timelineStartMs + follow.durationMs
+      trackId = follow.trackId
+    }
+
+    if (placements.length === 0) return null
+    dropPlanSeedRef.current = seedTracks
+    return { tracks: working.tracks, placements }
   }, [document, mediaDrop])
 
   const displayTracks = useMemo(() => {
@@ -720,7 +759,7 @@ export function TimelinePanel() {
         tracks: displayTracksRef.current,
         kind,
       })
-      return { timelineStartMs, trackId, mediaSourceId }
+      return { timelineStartMs, trackId, mediaSourceIds: draggingMediaSourceIds() }
     },
     [contentWidth, pixelsPerSecond],
   )
@@ -738,21 +777,25 @@ export function TimelinePanel() {
       }
       setHoverFrameMs(null)
       setMediaDrop((current) => {
-        const mediaSourceId = target.mediaSourceId
+        const mediaSourceIds = target.mediaSourceIds
+        const sameIds =
+          current != null &&
+          current.mediaSourceIds.length === mediaSourceIds.length &&
+          current.mediaSourceIds.every((id, index) => id === mediaSourceIds[index])
         if (
           current &&
-          current.mediaSourceId === mediaSourceId &&
+          sameIds &&
           current.timelineStartMs === target.timelineStartMs &&
           current.trackId === target.trackId &&
-          current.fileDrop === (mediaSourceId == null)
+          current.fileDrop === (mediaSourceIds.length === 0)
         ) {
           return current
         }
         return {
-          mediaSourceId,
+          mediaSourceIds,
           timelineStartMs: target.timelineStartMs,
           trackId: target.trackId,
-          fileDrop: mediaSourceId == null,
+          fileDrop: mediaSourceIds.length === 0,
         }
       })
     },
@@ -774,10 +817,24 @@ export function TimelinePanel() {
       }
 
       if (libraryDrop) {
-        const mediaSourceId = libraryMediaIdFromDrop(event.dataTransfer)
+        const mediaSourceIds = libraryMediaIdsFromDrop(event.dataTransfer)
         endMediaDrag()
-        if (mediaSourceId) {
-          addClip(mediaSourceId, target.timelineStartMs, target.trackId)
+        let startMs = target.timelineStartMs
+        let trackId = target.trackId
+        for (const mediaSourceId of mediaSourceIds) {
+          const before = new Set(
+            useEditorStore.getState().document.clips.map((clip) => clip.id),
+          )
+          addClip(mediaSourceId, startMs, trackId)
+          const added = useEditorStore
+            .getState()
+            .document.clips.filter((clip) => !before.has(clip.id))
+          const follow =
+            added.find((clip) => clip.trackId === trackId) ?? added[0]
+          if (!follow) continue
+          startMs =
+            follow.timelineStartMs + (follow.sourceOutMs - follow.sourceInMs)
+          trackId = follow.trackId
         }
         return
       }
@@ -1581,26 +1638,42 @@ export function TimelinePanel() {
                   })}
                 {dropPlan?.placements
                   .filter((item) => item.trackId === track.id)
-                  .map((item) => (
-                    <div
-                      key={item.role}
-                      className={`pointer-events-none absolute top-1.5 z-10 rounded-md border-2 border-dashed opacity-80 ${
-                        item.role === 'video'
-                          ? 'border-fb-video-border bg-fb-video/50'
-                          : 'border-fb-audio-border bg-fb-audio/50'
-                      }`}
-                      style={{
-                        left:
-                          TIMELINE_X_INSET +
-                          msToPx(item.timelineStartMs, pixelsPerSecond),
-                        width: Math.max(
-                          8,
-                          msToPx(item.durationMs, pixelsPerSecond),
-                        ),
-                        height: 'calc(100% - 12px)',
-                      }}
-                    />
-                  ))}
+                  .map((item, index) => {
+                    const grabbedCount = mediaDrop?.mediaSourceIds.length ?? 0
+                    const lead = dropPlan.placements[0]
+                    const showCount =
+                      grabbedCount > 1 &&
+                      index === 0 &&
+                      lead != null &&
+                      item.trackId === lead.trackId &&
+                      item.timelineStartMs === lead.timelineStartMs
+                    return (
+                      <div
+                        key={`${item.role}-${item.timelineStartMs}-${index}`}
+                        className={`pointer-events-none absolute top-1.5 z-10 rounded-md border-2 border-dashed opacity-80 ${
+                          item.role === 'video'
+                            ? 'border-fb-video-border bg-fb-video/50'
+                            : 'border-fb-audio-border bg-fb-audio/50'
+                        }`}
+                        style={{
+                          left:
+                            TIMELINE_X_INSET +
+                            msToPx(item.timelineStartMs, pixelsPerSecond),
+                          width: Math.max(
+                            8,
+                            msToPx(item.durationMs, pixelsPerSecond),
+                          ),
+                          height: 'calc(100% - 12px)',
+                        }}
+                      >
+                        {showCount && (
+                          <span className="absolute top-1 left-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-fb-accent px-1 text-[11px] font-bold tracking-normal text-white">
+                            {grabbedCount}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
                 {mediaDrop?.fileDrop && mediaDrop.trackId === track.id && (
                   <div
                     className="pointer-events-none absolute top-1.5 z-10 rounded-md border-2 border-dashed border-fb-border-strong bg-white/10"

@@ -75,6 +75,11 @@ textarea {
   outline-offset: 2px;
 }
 
+html.media-dragging,
+html.media-dragging * {
+  cursor: grabbing !important;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
