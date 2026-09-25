@@ -876,22 +876,15 @@ export function TimelinePanel() {
         Math.max(0, contentWidth - TIMELINE_X_INSET),
         pixelsPerSecond,
       )
-      const rawStartMs = clamp(pxToMs(Math.max(0, x), pixelsPerSecond), 0, maxMs)
+      const pointerMs = clamp(pxToMs(Math.max(0, x), pixelsPerSecond), 0, maxMs)
       const mediaSourceId = draggingMediaSourceId()
       const source = mediaSourceId
         ? useEditorStore
             .getState()
             .document.mediaSources.find((item) => item.id === mediaSourceId)
         : undefined
+      const durationMs = source?.durationMs ?? 0
       const doc = useEditorStore.getState().document
-      const timelineStartMs = magneticMoveStartMs({
-        rawStartMs,
-        durationMs: source?.durationMs ?? 0,
-        pixelsPerSecond,
-        playheadMs: useEditorStore.getState().ui.playheadMs,
-        clips: doc.clips,
-        ignoreIds: new Set(),
-      })
       const kind =
         source && source.hasVideo && !source.hasAudio
           ? 'video'
@@ -904,6 +897,26 @@ export function TimelinePanel() {
         scrollTop: viewport.scrollTop,
         tracks: displayTracksRef.current,
         kind,
+      })
+      const covering = doc.clips.find((clip) => {
+        if (trackId && clip.trackId !== trackId) return false
+        const clipEnd =
+          clip.timelineStartMs + (clip.sourceOutMs - clip.sourceInMs)
+        return pointerMs >= clip.timelineStartMs && pointerMs < clipEnd
+      })
+      // Over an existing clip, begin just left of that clip's start so the
+      // strip is not parked at the pointer in the middle of it.
+      const leadMs = pxToMs(16, pixelsPerSecond)
+      const rawStartMs = covering
+        ? Math.max(0, covering.timelineStartMs - leadMs)
+        : pointerMs
+      const timelineStartMs = magneticMoveStartMs({
+        rawStartMs,
+        durationMs: covering ? 0 : durationMs,
+        pixelsPerSecond,
+        playheadMs: useEditorStore.getState().ui.playheadMs,
+        clips: doc.clips,
+        ignoreIds: new Set(covering ? [covering.id] : []),
       })
       return { timelineStartMs, trackId, mediaSourceIds: draggingMediaSourceIds() }
     },
