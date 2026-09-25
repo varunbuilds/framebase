@@ -31,7 +31,7 @@ import {
   libraryMediaIdFromDrop,
 } from '@/lib/media/media-drag'
 import type { Clip, Track } from '@/types/timeline'
-import { clamp, formatTimecode, snapToFrameMs } from '@/utils/time'
+import { clamp, formatFrameClock, formatSignedFrameClock, formatTimecode, FRAME_DURATION_MS, snapToFrameMs } from '@/utils/time'
 
 const TRACK_HEIGHT = 104
 const RULER_HEIGHT = 28
@@ -65,6 +65,44 @@ function pxToMs(px: number, pixelsPerSecond: number): number {
   return Math.round((px / pixelsPerSecond) * 1000)
 }
 
+function magneticMoveStartMs(args: {
+  rawStartMs: number
+  durationMs: number
+  pixelsPerSecond: number
+  playheadMs: number
+  clips: Clip[]
+  ignoreIds: Set<string>
+}): number {
+  const thresholdMs = Math.max(1, pxToMs(12, args.pixelsPerSecond))
+  let best = snapToFrameMs(Math.max(0, args.rawStartMs))
+  let bestDistance = thresholdMs + 1
+
+  const consider = (point: number) => {
+    const next = Math.max(0, Math.round(point))
+    const distance = Math.abs(next - args.rawStartMs)
+    if (distance <= thresholdMs && distance < bestDistance) {
+      best = next
+      bestDistance = distance
+    }
+  }
+
+  consider(0)
+  consider(args.playheadMs)
+  consider(args.playheadMs - args.durationMs)
+  for (const clip of args.clips) {
+    if (args.ignoreIds.has(clip.id)) continue
+    const endMs =
+      clip.timelineStartMs + (clip.sourceOutMs - clip.sourceInMs)
+    consider(clip.timelineStartMs)
+    consider(endMs)
+    consider(clip.timelineStartMs - args.durationMs)
+    consider(endMs - args.durationMs)
+  }
+
+  return best
+}
+
+
 /** Hit-test a track row under the pointer in the vertically scrolling body. */
 function trackIdAtClientY(args: {
   clientY: number
@@ -92,24 +130,65 @@ function trackIdAtClientY(args: {
 }
 
 
+const FILMSTRIP_HEIGHT = 70
+const filmstripCache = new Map<string, string>()
+
+function filmstripKey(src: string, timeMs: number): string {
+  return `${src}|${timeMs}`
+}
+
+/**
+ * Premiere/Resolve-style strip: fixed-aspect thumbnails locked to source time.
+ * Zoom shows more tiles; trimming slides the same tiles instead of stretching them.
+ */
 function VideoFilmstrip({
   src,
-  durationMs,
-  widthPx,
+  sourceInMs,
+  sourceOutMs,
+  mediaDurationMs,
+  pixelsPerSecond,
+  aspect,
 }: {
   src: string
-  durationMs: number
-  widthPx: number
+  sourceInMs: number
+  sourceOutMs: number
+  mediaDurationMs: number
+  pixelsPerSecond: number
+  aspect: number
 }) {
-  const [frames, setFrames] = useState<string[]>([])
-  // Quantize width so zooming doesn't re-decode every pixel; denser than before.
-  const widthBucket = Math.max(160, Math.ceil(widthPx / 64) * 64)
-  const frameCount = Math.max(
-    6,
-    Math.min(40, Math.ceil(widthBucket / 56), Math.ceil(durationMs / 600)),
+  const [, setCacheVersion] = useState(0)
+  const safeAspect = Number.isFinite(aspect) && aspect > 0.2 ? aspect : 16 / 9
+  const idealThumbWidth = Math.max(36, Math.round(FILMSTRIP_HEIGHT * safeAspect))
+  const clipPx = Math.max(
+    idealThumbWidth,
+    msToPx(Math.max(1, sourceOutMs - sourceInMs), pixelsPerSecond),
   )
+  const thumbWidth =
+    clipPx / idealThumbWidth > 48
+      ? Math.ceil(clipPx / 48)
+      : idealThumbWidth
+  const slotMs = Math.max(
+    FRAME_DURATION_MS,
+    pxToMs(thumbWidth, pixelsPerSecond),
+  )
+  const durationMs = Math.max(slotMs, mediaDurationMs)
+  const startSlot = Math.max(0, Math.floor(sourceInMs / slotMs))
+  const endSlot = Math.min(
+    Math.ceil(durationMs / slotMs),
+    Math.ceil(Math.max(sourceInMs, sourceOutMs) / slotMs) + 1,
+  )
+  const slots: number[] = []
+  for (let slot = startSlot; slot <= endSlot; slot += 1) slots.push(slot)
+  const offsetPx = msToPx(sourceInMs, pixelsPerSecond) - startSlot * thumbWidth
 
   useEffect(() => {
+    const missing: number[] = []
+    for (let slot = startSlot; slot <= endSlot; slot += 1) {
+      const timeMs = Math.min(durationMs - 1, Math.round(slot * slotMs + slotMs / 2))
+      if (!filmstripCache.has(filmstripKey(src, timeMs))) missing.push(slot)
+    }
+    if (missing.length === 0) return
+
     let cancelled = false
     const video = document.createElement('video')
     video.src = src
@@ -118,67 +197,90 @@ function VideoFilmstrip({
     video.playsInline = true
     video.crossOrigin = 'anonymous'
 
-    const captureFrames = async () => {
-      const duration = Number.isFinite(video.duration)
-        ? Math.min(video.duration, durationMs / 1000)
-        : durationMs / 1000
-
-      const sourceW = video.videoWidth || 320
-      const sourceH = video.videoHeight || 180
-      const maxEdge = 360
-      const scale = Math.min(1, maxEdge / Math.max(sourceW, sourceH))
+    const capture = async () => {
       const canvas = document.createElement('canvas')
-      canvas.width = Math.max(1, Math.round(sourceW * scale))
-      canvas.height = Math.max(1, Math.round(sourceH * scale))
+      const height = 180
+      const width = Math.max(1, Math.round(height * safeAspect))
+      canvas.width = width
+      canvas.height = height
       const context = canvas.getContext('2d')
       if (!context) return
       context.imageSmoothingEnabled = true
       context.imageSmoothingQuality = 'high'
 
-      const nextFrames: string[] = []
-      for (let index = 0; index < frameCount; index += 1) {
-        await new Promise<void>((resolve) => {
-          video.onseeked = () => resolve()
-          video.onerror = () => resolve()
-          video.currentTime = Math.min(
-            Math.max(0, duration - 0.04),
-            (duration * (index + 0.5)) / frameCount,
-          )
-        })
+      for (const slot of missing) {
         if (cancelled) return
-        context.clearRect(0, 0, canvas.width, canvas.height)
-        context.drawImage(video, 0, 0, canvas.width, canvas.height)
-        nextFrames.push(canvas.toDataURL('image/jpeg', 0.92))
+        const timeMs = Math.min(
+          durationMs - 1,
+          Math.round(slot * slotMs + slotMs / 2),
+        )
+        const key = filmstripKey(src, timeMs)
+        if (filmstripCache.has(key)) continue
+        await new Promise<void>((resolve) => {
+          const finish = () => resolve()
+          video.onseeked = finish
+          video.onerror = finish
+          const seconds = Math.min(
+            Math.max(0, (video.duration || durationMs / 1000) - 0.05),
+            timeMs / 1000,
+          )
+          if (Math.abs(video.currentTime - seconds) < 0.02) {
+            finish()
+            return
+          }
+          video.currentTime = seconds
+        })
+        if (cancelled || filmstripCache.has(key)) continue
+        context.drawImage(video, 0, 0, width, height)
+        filmstripCache.set(key, canvas.toDataURL('image/jpeg', 0.86))
+        setCacheVersion((version) => version + 1)
       }
-      if (!cancelled) setFrames(nextFrames)
     }
-    video.onloadedmetadata = () => void captureFrames()
+
+    const start = () => void capture()
+    if (video.readyState >= 1) start()
+    else video.onloadedmetadata = start
     video.onerror = () => {
-      if (!cancelled) setFrames([])
+      if (!cancelled) setCacheVersion((version) => version + 1)
     }
+
     return () => {
       cancelled = true
+      video.onloadedmetadata = null
+      video.onseeked = null
       video.removeAttribute('src')
       video.load()
     }
-  }, [durationMs, frameCount, src])
-
-  if (frames.length === 0) {
-    return <div className="h-full w-full bg-[#1a2228]" aria-hidden />
-  }
+  }, [durationMs, endSlot, safeAspect, slotMs, src, startSlot])
 
   return (
-    <div className="pointer-events-none flex h-full w-full overflow-clip" aria-hidden>
-      {frames.map((frame, index) => (
-        <img
-          key={`${index}-${frame.slice(-16)}`}
-          src={frame}
-          className="h-full min-w-0 flex-1 object-cover"
-          alt=""
-          draggable={false}
-          decoding="async"
-        />
-      ))}
+    <div className="pointer-events-none h-full w-full overflow-clip" aria-hidden>
+      <div className="flex h-full" style={{ marginLeft: -offsetPx }}>
+        {slots.map((slot) => {
+          const timeMs = Math.min(
+            durationMs - 1,
+            Math.round(slot * slotMs + slotMs / 2),
+          )
+          const frame = filmstripCache.get(filmstripKey(src, timeMs))
+          return (
+            <div
+              key={slot}
+              className="h-full shrink-0 bg-[#1a2228]"
+              style={{ width: thumbWidth }}
+            >
+              {frame ? (
+                <img
+                  src={frame}
+                  alt=""
+                  draggable={false}
+                  decoding="async"
+                  className="h-full w-full object-cover"
+                />
+              ) : null}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -252,6 +354,21 @@ function TimelineClipBlock({
   const isVideo = track.kind === 'video'
   const objectUrl = media ? getObjectUrl(media.id) : undefined
   const title = clip.label ?? media?.name ?? 'Clip'
+  const trimmingEdge =
+    isDragParticipant && drag && (drag.mode === 'trim-in' || drag.mode === 'trim-out')
+      ? drag.mode
+      : null
+  const isPrimaryTrim = trimmingEdge != null && drag?.clipId === clip.id
+  const trimDeltaMs =
+    trimmingEdge === 'trim-in'
+      ? sourceInMs - (drag?.originSourceInMs ?? sourceInMs)
+      : trimmingEdge === 'trim-out'
+        ? sourceOutMs - (drag?.originSourceOutMs ?? sourceOutMs)
+        : 0
+  const trimEdgeMs =
+    trimmingEdge === 'trim-in'
+      ? timelineStartMs
+      : timelineStartMs + durationMs
 
   return (
     <div
@@ -277,35 +394,54 @@ function TimelineClipBlock({
         onSelect(event.metaKey || event.ctrlKey)
         onPointerDownMove(event.clientX, event.clientY)
       }}
-      className={`absolute top-1.5 z-0 flex h-[calc(100%-12px)] flex-col overflow-clip rounded-md border-2 ${
-        isMoving ? 'cursor-grabbing' : 'cursor-default'
+      className={`absolute top-1.5 z-0 flex h-[calc(100%-12px)] flex-col rounded-md border-2 ${
+        isMoving
+          ? 'z-10 cursor-grabbing border-dashed opacity-90 shadow-[0_10px_28px_rgba(0,0,0,0.45)]'
+          : 'cursor-default'
       } ${isVideo ? 'bg-[#151c22]' : 'bg-[#13241f]'} ${
-        selected
-          ? 'border-fb-accent'
-          : linkedHighlight
-            ? 'border-fb-accent/70'
-            : isVideo
-              ? 'border-[#2a3a45]'
-              : 'border-[#1f3d34]'
+        trimmingEdge
+          ? 'z-10 border-[#7dffb2]'
+          : selected
+            ? 'border-fb-accent'
+            : linkedHighlight
+              ? 'border-fb-accent/70'
+              : isVideo
+                ? 'border-[#2a3a45]'
+                : 'border-[#1f3d34]'
       }`}
       style={{ left: TIMELINE_X_INSET + left, width }}
     >
-      <div className="relative flex h-[22px] shrink-0 items-center bg-[#243038] px-2">
+      {isPrimaryTrim && (
+        <div
+          className={`pointer-events-none absolute bottom-full z-50 mb-2 min-w-[78px] rounded-lg bg-black/85 px-2 py-1 text-right font-mono text-[11px] leading-tight text-white shadow-[0_8px_24px_rgba(0,0,0,0.45)] ${
+            trimmingEdge === 'trim-out' ? 'right-0' : 'left-0'
+          }`}
+        >
+          <div>{formatSignedFrameClock(trimDeltaMs)}</div>
+          <div className="text-white/75">{formatFrameClock(trimEdgeMs)}</div>
+        </div>
+      )}
+      <div className="relative flex h-[22px] shrink-0 items-center overflow-clip rounded-t-[4px] bg-[#243038] px-2">
         <span className="truncate text-[10px] font-medium leading-none text-white/90">
           {title}
         </span>
       </div>
 
       <div
-        className={`relative min-h-0 flex-1 overflow-clip ${
+        className={`relative min-h-0 flex-1 overflow-clip rounded-b-[4px] ${
           isVideo ? 'bg-[#1a2228]' : 'bg-[#16352c]'
         }`}
       >
-        {isVideo && objectUrl ? (
+        {isVideo && objectUrl && media ? (
           <VideoFilmstrip
             src={objectUrl}
-            durationMs={durationMs}
-            widthPx={width}
+            sourceInMs={sourceInMs}
+            sourceOutMs={sourceOutMs}
+            mediaDurationMs={media.durationMs}
+            pixelsPerSecond={pixelsPerSecond}
+            aspect={
+              media.width && media.height ? media.width / media.height : 16 / 9
+            }
           />
         ) : objectUrl && media ? (
           <AudioWaveform
@@ -321,11 +457,20 @@ function TimelineClipBlock({
         )}
       </div>
 
+      {trimmingEdge === 'trim-in' && (
+        <div className="pointer-events-none absolute inset-y-0 left-0 z-20 w-0.5 bg-[#7dffb2] shadow-[0_0_8px_rgba(125,255,178,0.85)]" />
+      )}
+      {trimmingEdge === 'trim-out' && (
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-20 w-0.5 bg-[#7dffb2] shadow-[0_0_8px_rgba(125,255,178,0.85)]" />
+      )}
+
       <button
         type="button"
         data-trim="in"
         aria-label="Trim clip start"
-        className="absolute inset-y-0 left-0 z-[1] w-1.5 cursor-ew-resize bg-transparent hover:bg-white/25"
+        className={`absolute inset-y-0 left-0 z-[1] w-2 cursor-ew-resize ${
+          trimmingEdge === 'trim-in' ? 'bg-[#7dffb2]/25' : 'bg-transparent hover:bg-white/25'
+        }`}
         onPointerDown={(event) => {
           event.stopPropagation()
           onSelect(event.metaKey || event.ctrlKey)
@@ -336,7 +481,9 @@ function TimelineClipBlock({
         type="button"
         data-trim="out"
         aria-label="Trim clip end"
-        className="absolute inset-y-0 right-0 z-[1] w-1.5 cursor-ew-resize bg-transparent hover:bg-white/25"
+        className={`absolute inset-y-0 right-0 z-[1] w-2 cursor-ew-resize ${
+          trimmingEdge === 'trim-out' ? 'bg-[#7dffb2]/25' : 'bg-transparent hover:bg-white/25'
+        }`}
         onPointerDown={(event) => {
           event.stopPropagation()
           onSelect(event.metaKey || event.ctrlKey)
@@ -384,6 +531,8 @@ export function TimelinePanel() {
   const bodyScrollRef = useRef<HTMLDivElement>(null)
   const tracksContentRef = useRef<HTMLDivElement>(null)
   const dragDeltaMsRef = useRef(0)
+  const dragGrabOffsetMsRef = useRef(0)
+  const clipDragPointerRef = useRef<{ x: number; y: number } | null>(null)
   const dragPreferredTrackIdRef = useRef<string | undefined>(undefined)
   const isScrubbingRef = useRef(false)
   const panRef = useRef<{
@@ -532,33 +681,48 @@ export function TimelinePanel() {
 
   const timelineDropTarget = useCallback(
     (clientX: number, clientY: number) => {
-      const timelineStartMs = frameAtClientX(clientX)
-      if (timelineStartMs == null) return null
-      const body = bodyScrollRef.current
-      if (!body) return null
+      const viewport = bodyScrollRef.current
+      if (!viewport) return null
+      const bounds = viewport.getBoundingClientRect()
+      const localX = clientX - bounds.left
+      if (localX < LABEL_WIDTH) return null
+      const x = localX + viewport.scrollLeft - LABEL_WIDTH - TIMELINE_X_INSET
+      const maxMs = pxToMs(
+        Math.max(0, contentWidth - TIMELINE_X_INSET),
+        pixelsPerSecond,
+      )
+      const rawStartMs = clamp(pxToMs(Math.max(0, x), pixelsPerSecond), 0, maxMs)
       const mediaSourceId = draggingMediaSourceId()
       const source = mediaSourceId
         ? useEditorStore
             .getState()
             .document.mediaSources.find((item) => item.id === mediaSourceId)
         : undefined
+      const doc = useEditorStore.getState().document
+      const timelineStartMs = magneticMoveStartMs({
+        rawStartMs,
+        durationMs: source?.durationMs ?? 0,
+        pixelsPerSecond,
+        playheadMs: useEditorStore.getState().ui.playheadMs,
+        clips: doc.clips,
+        ignoreIds: new Set(),
+      })
       const kind =
         source && source.hasVideo && !source.hasAudio
           ? 'video'
           : source && source.hasAudio && !source.hasVideo
             ? 'audio'
             : undefined
-      const bounds = body.getBoundingClientRect()
       const trackId = trackIdAtClientY({
         clientY,
         bodyTop: bounds.top,
-        scrollTop: body.scrollTop,
+        scrollTop: viewport.scrollTop,
         tracks: displayTracksRef.current,
         kind,
       })
       return { timelineStartMs, trackId, mediaSourceId }
     },
-    [frameAtClientX],
+    [contentWidth, pixelsPerSecond],
   )
 
   const onTimelineDragOver = useCallback(
@@ -783,35 +947,140 @@ export function TimelinePanel() {
   useEffect(() => {
     if (!clipDrag) return
 
-    const onMove = (event: PointerEvent) => {
-      const next = pxToMs(event.clientX - clipDrag.originClientX, pixelsPerSecond)
-      dragDeltaMsRef.current = next
-      setDragDeltaMs(next)
+    const applyMove = (clientX: number, clientY: number) => {
+      const drag = useEditorStore.getState().clipDrag
+      if (!drag || drag.mode !== 'move') return
+      const viewport = bodyScrollRef.current
+      if (!viewport) return
+      const bounds = viewport.getBoundingClientRect()
+      const localX = Math.max(LABEL_WIDTH, clientX - bounds.left)
+      const x = localX + viewport.scrollLeft - LABEL_WIDTH - TIMELINE_X_INSET
+      const maxMs = pxToMs(
+        Math.max(0, viewport.scrollWidth - LABEL_WIDTH - TIMELINE_X_INSET),
+        pixelsPerSecond,
+      )
+      const underMs = clamp(pxToMs(Math.max(0, x), pixelsPerSecond), 0, maxMs)
+      const rawStart = underMs - dragGrabOffsetMsRef.current
+      const doc = useEditorStore.getState().document
+      const moving = doc.clips.filter(
+        (clip) =>
+          clip.id === drag.clipId ||
+          (Boolean(drag.linkGroupId) && clip.linkGroupId === drag.linkGroupId),
+      )
+      const primary = moving.find((clip) => clip.id === drag.clipId)
+      const durationMs = primary
+        ? primary.sourceOutMs - primary.sourceInMs
+        : 0
+      const snapped = magneticMoveStartMs({
+        rawStartMs: rawStart,
+        durationMs,
+        pixelsPerSecond,
+        playheadMs: useEditorStore.getState().ui.playheadMs,
+        clips: doc.clips,
+        ignoreIds: new Set(moving.map((clip) => clip.id)),
+      })
+      const delta = snapped - drag.originTimelineStartMs
+      dragDeltaMsRef.current = delta
+      setDragDeltaMs(delta)
 
-      if (clipDrag.mode === 'move') {
-        const body = bodyScrollRef.current
-        if (body && primaryDragKind) {
-          const bounds = body.getBoundingClientRect()
-          const preferred = trackIdAtClientY({
-            clientY: event.clientY,
-            bodyTop: bounds.top,
-            scrollTop: body.scrollTop,
-            tracks: displayTracksRef.current,
-            kind: primaryDragKind,
-          })
-          dragPreferredTrackIdRef.current = preferred
-          setDragPreferredTrackId(preferred)
-        }
+      if (primaryDragKind) {
+        const preferred = trackIdAtClientY({
+          clientY,
+          bodyTop: bounds.top,
+          scrollTop: viewport.scrollTop,
+          tracks: displayTracksRef.current,
+          kind: primaryDragKind,
+        })
+        dragPreferredTrackIdRef.current = preferred
+        setDragPreferredTrackId(preferred)
       }
     }
 
+    const onMove = (event: PointerEvent) => {
+      const drag = useEditorStore.getState().clipDrag
+      if (!drag) return
+      if (drag.mode !== 'move') {
+        const rawDelta = pxToMs(event.clientX - drag.originClientX, pixelsPerSecond)
+        const originDuration = drag.originSourceOutMs - drag.originSourceInMs
+        const rawEdge =
+          drag.mode === 'trim-in'
+            ? drag.originTimelineStartMs + rawDelta
+            : drag.originTimelineStartMs + originDuration + rawDelta
+        const doc = useEditorStore.getState().document
+        const movingIds = new Set(
+          doc.clips
+            .filter(
+              (clip) =>
+                clip.id === drag.clipId ||
+                (Boolean(drag.linkGroupId) &&
+                  clip.linkGroupId === drag.linkGroupId),
+            )
+            .map((clip) => clip.id),
+        )
+        const snappedEdge = magneticMoveStartMs({
+          rawStartMs: Math.max(0, rawEdge),
+          durationMs: 0,
+          pixelsPerSecond,
+          playheadMs: useEditorStore.getState().ui.playheadMs,
+          clips: doc.clips,
+          ignoreIds: movingIds,
+        })
+        const delta =
+          drag.mode === 'trim-in'
+            ? snappedEdge - drag.originTimelineStartMs
+            : snappedEdge - (drag.originTimelineStartMs + originDuration)
+        dragDeltaMsRef.current = delta
+        setDragDeltaMs(delta)
+        return
+      }
+      clipDragPointerRef.current = { x: event.clientX, y: event.clientY }
+      applyMove(event.clientX, event.clientY)
+    }
+
+    let frame = 0
+    const tick = () => {
+      if (clipDrag.mode !== 'move') return
+      const pointer = clipDragPointerRef.current
+      const viewport = bodyScrollRef.current
+      if (pointer && viewport) {
+        const bounds = viewport.getBoundingClientRect()
+        const localX = pointer.x - bounds.left
+        const localY = pointer.y - bounds.top
+        const maxLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth)
+        const maxTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+        let scrolled = false
+        if (localX > bounds.width - 64 && viewport.scrollLeft < maxLeft) {
+          viewport.scrollLeft = Math.min(maxLeft, viewport.scrollLeft + 16)
+          scrolled = true
+        } else if (localX < LABEL_WIDTH + 64 && viewport.scrollLeft > 0) {
+          viewport.scrollLeft = Math.max(0, viewport.scrollLeft - 16)
+          scrolled = true
+        }
+        if (localY > bounds.height - 36 && viewport.scrollTop < maxTop) {
+          viewport.scrollTop = Math.min(maxTop, viewport.scrollTop + 10)
+          scrolled = true
+        } else if (localY < RULER_HEIGHT + 28 && viewport.scrollTop > 0) {
+          viewport.scrollTop = Math.max(0, viewport.scrollTop - 10)
+          scrolled = true
+        }
+        if (scrolled) applyMove(pointer.x, pointer.y)
+      }
+      frame = window.requestAnimationFrame(tick)
+    }
+    if (clipDrag.mode === 'move') {
+      frame = window.requestAnimationFrame(tick)
+    }
+
     const onUp = () => {
+      clipDragPointerRef.current = null
       commitDrag()
     }
 
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     return () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      clipDragPointerRef.current = null
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
@@ -1178,7 +1447,8 @@ export function TimelinePanel() {
               <div
                 key={track.id}
                 className={`relative border-b border-fb-border ${
-                  mediaDrop?.trackId === track.id
+                  mediaDrop?.trackId === track.id ||
+                  (isClipMoving && dragPreferredTrackId === track.id)
                     ? 'bg-white/[0.045]'
                     : 'bg-fb-surface'
                 }`}
@@ -1199,6 +1469,35 @@ export function TimelinePanel() {
                   }
                 }}
               >
+                {document.clips
+                  .filter((clip) => {
+                    const placement = placementByClipId?.get(clip.id)
+                    if (!placement) return false
+                    const moved =
+                      placement.trackId !== clip.trackId ||
+                      placement.timelineStartMs !== clip.timelineStartMs
+                    return moved && clip.trackId === track.id
+                  })
+                  .map((clip) => {
+                    const durationMs = clip.sourceOutMs - clip.sourceInMs
+                    return (
+                      <div
+                        key={`${clip.id}-origin`}
+                        className={`pointer-events-none absolute top-1.5 rounded-md border-2 border-dashed opacity-35 ${
+                          track.kind === 'video'
+                            ? 'border-fb-video-border bg-fb-video/40'
+                            : 'border-fb-audio-border bg-fb-audio/40'
+                        }`}
+                        style={{
+                          left:
+                            TIMELINE_X_INSET +
+                            msToPx(clip.timelineStartMs, pixelsPerSecond),
+                          width: Math.max(8, msToPx(durationMs, pixelsPerSecond)),
+                          height: 'calc(100% - 12px)',
+                        }}
+                      />
+                    )
+                  })}
                 {document.clips
                   .filter((clip) => {
                     const placement = placementByClipId?.get(clip.id)
@@ -1240,6 +1539,10 @@ export function TimelinePanel() {
                           selectClip(clip.id, { additive })
                         }
                         onPointerDownMove={(clientX, clientY) => {
+                          const underMs = frameAtClientX(clientX)
+                          dragGrabOffsetMsRef.current =
+                            (underMs ?? clip.timelineStartMs) - clip.timelineStartMs
+                          clipDragPointerRef.current = { x: clientX, y: clientY }
                           dragDeltaMsRef.current = 0
                           dragPreferredTrackIdRef.current = track.id
                           setDragDeltaMs(0)

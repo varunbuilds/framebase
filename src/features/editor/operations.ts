@@ -642,37 +642,6 @@ function resolveTrackWithoutOverlap(args: {
   return { tracks: created.tracks, trackId: created.track.id }
 }
 
-function snapStartMsOnTrack(
-  clips: Clip[],
-  trackId: string,
-  clip: Clip,
-  startMs: TimeMs,
-): TimeMs {
-  const durationMs = clip.sourceOutMs - clip.sourceInMs
-  const snapDistanceMs = 180
-  let nearest = startMs
-  let nearestDistance = snapDistanceMs + 1
-
-  for (const candidate of clips) {
-    if (candidate.trackId !== trackId) continue
-    const candidateEndMs =
-      candidate.timelineStartMs +
-      (candidate.sourceOutMs - candidate.sourceInMs)
-    for (const point of [
-      candidateEndMs,
-      candidate.timelineStartMs - durationMs,
-    ]) {
-      const distance = Math.abs(startMs - point)
-      if (distance < nearestDistance) {
-        nearest = Math.max(0, point)
-        nearestDistance = distance
-      }
-    }
-  }
-
-  return nearest
-}
-
 export type ClipMovePlacement = {
   clipId: string
   trackId: string
@@ -750,25 +719,6 @@ export function planClipMove(args: {
     const preferredTrackId =
       target.id === args.clipId ? args.trackId : undefined
 
-    if (!movingLinkedGroup && preferredTrackId) {
-      nextStartMs = snapStartMsOnTrack(
-        occupiedClips,
-        preferredTrackId,
-        target,
-        nextStartMs,
-      )
-    } else if (!movingLinkedGroup) {
-      const home = sortTracksHomeFirst(tracks, targetTrack.kind)[0]
-      if (home) {
-        nextStartMs = snapStartMsOnTrack(
-          occupiedClips,
-          home.id,
-          target,
-          nextStartMs,
-        )
-      }
-    }
-
     const durationMs = target.sourceOutMs - target.sourceInMs
     const resolved = resolveTrackWithoutOverlap({
       tracks,
@@ -781,17 +731,6 @@ export function planClipMove(args: {
     })
 
     tracks = resolved.tracks
-
-    if (
-      !movingLinkedGroup &&
-      preferredTrackId &&
-      resolved.trackId !== preferredTrackId
-    ) {
-      nextStartMs =
-        target.id === args.clipId
-          ? Math.max(0, Math.round(args.timelineStartMs))
-          : Math.max(0, target.timelineStartMs + deltaMs)
-    }
 
     placements.push({
       clipId: target.id,

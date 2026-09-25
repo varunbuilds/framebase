@@ -43,6 +43,22 @@ export function formatTimecode(ms: TimeMs): string {
   return `${pad(minutes)}:${pad(seconds)}.${pad(framesApprox)}`
 }
 
+/** Minutes:seconds:frames, used by the trim edge readout. */
+export function formatFrameClock(ms: TimeMs): string {
+  const frameIndex = Math.max(0, Math.round(ms / FRAME_DURATION_MS))
+  const frames = frameIndex % TIMELINE_FPS
+  const totalSeconds = Math.floor(frameIndex / TIMELINE_FPS)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  return `${pad(minutes)}:${pad(seconds)}:${pad(frames)}`
+}
+
+export function formatSignedFrameClock(ms: TimeMs): string {
+  if (ms > 0) return `+${formatFrameClock(ms)}`
+  return `-${formatFrameClock(Math.abs(ms))}`
+}
+
 export function formatDurationShort(ms: TimeMs): string {
   if (!Number.isFinite(ms) || ms <= 0) return '0:00'
   const totalSeconds = Math.round(ms / 1000)
