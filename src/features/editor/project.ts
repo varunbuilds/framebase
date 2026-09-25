@@ -31,10 +31,13 @@ export function createDefaultTracks(): Track[] {
   ]
 }
 
-export function createEmptyProject(name = 'Untitled Project'): ProjectDocument {
+export function createEmptyProject(
+  name = 'Untitled Project',
+  id = createId('project'),
+): ProjectDocument {
   const now = new Date().toISOString()
   return {
-    id: createId('project'),
+    id,
     name,
     tracks: createDefaultTracks(),
     clips: [],
@@ -42,6 +45,17 @@ export function createEmptyProject(name = 'Untitled Project'): ProjectDocument {
     createdAt: now,
     updatedAt: now,
   }
+}
+
+/** Store placeholder. Not a created project and never persisted. */
+export const unloadedProject: ProjectDocument = {
+  id: 'unloaded',
+  name: 'Untitled Project',
+  tracks: [],
+  clips: [],
+  mediaSources: [],
+  createdAt: '1970-01-01T00:00:00.000Z',
+  updatedAt: '1970-01-01T00:00:00.000Z',
 }
 
 export function touchDocument(document: ProjectDocument): ProjectDocument {

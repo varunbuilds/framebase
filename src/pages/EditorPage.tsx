@@ -1,0 +1,84 @@
+import { getRouteApi, Link } from '@tanstack/react-router'
+import { useLayoutEffect } from 'react'
+import { EditorShell } from '@/components/layout/EditorShell'
+import { getObjectUrl } from '@/lib/media/object-urls'
+import { prepareLoadedDocument } from '@/features/projects/document'
+import { useProjectAutosave } from '@/features/projects/use-project-autosave'
+import { useEditorStore } from '@/stores/editor-store'
+const editorRoute = getRouteApi('/authenticated/editor/$projectId')
+
+function OpeningProject() {
+  return (
+    <main className="grid h-dvh place-items-center bg-fb-app text-[13px] text-fb-muted">
+      Opening project…
+    </main>
+  )
+}
+
+export function EditorPage() {
+  const project = editorRoute.useLoaderData()
+  const documentId = useEditorStore((state) => state.document.id)
+  const loadDocument = useEditorStore((state) => state.loadDocument)
+
+  useLayoutEffect(() => {
+    const prepared = prepareLoadedDocument(project.document, (mediaSourceId) =>
+      Boolean(getObjectUrl(mediaSourceId)),
+    )
+    loadDocument(prepared, project.updatedAt)
+  }, [loadDocument, project])
+
+  if (documentId !== project.id) return <OpeningProject />
+
+  return (
+    <>
+      <EditorShell />
+      <ProjectAutosave projectId={project.id} />
+    </>
+  )
+}
+
+function ProjectAutosave({ projectId }: { projectId: string }) {
+  useProjectAutosave(projectId)
+  return null
+}
+
+export function EditorNotFound() {
+  return (
+    <main className="grid h-dvh place-items-center bg-fb-app px-6 text-center">
+      <div>
+        <h1 className="text-[20px] font-semibold text-fb-text">
+          This project is not available
+        </h1>
+        <p className="mt-2 max-w-[36ch] text-[13px] text-fb-muted">
+          It may have been deleted, or it belongs to another account.
+        </p>
+        <Link
+          to="/projects"
+          className="mt-6 inline-block h-9 rounded-md bg-white px-3 text-[13px] font-medium leading-9 text-black no-underline"
+        >
+          Back to projects
+        </Link>
+      </div>
+    </main>
+  )
+}
+
+export function EditorLoadError({ error }: { error: unknown }) {
+  const message = error instanceof Error ? error.message : 'Could not open this project'
+  return (
+    <main className="grid h-dvh place-items-center bg-fb-app px-6 text-center">
+      <div>
+        <h1 className="text-[20px] font-semibold text-fb-text">
+          Could not open this project
+        </h1>
+        <p className="mt-2 max-w-[42ch] text-[13px] text-fb-danger">{message}</p>
+        <Link
+          to="/projects"
+          className="mt-6 inline-block h-9 rounded-md bg-white px-3 text-[13px] font-medium leading-9 text-black no-underline"
+        >
+          Back to projects
+        </Link>
+      </div>
+    </main>
+  )
+}

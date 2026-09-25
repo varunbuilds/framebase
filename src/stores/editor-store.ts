@@ -16,10 +16,10 @@ import {
 } from '@/features/editor/operations'
 import { getPlaybackEndMs } from '@/features/editor/playback'
 import {
-  createEmptyProject,
   getLinkedClips,
   projectContentEqual,
   touchDocument,
+  unloadedProject,
 } from '@/features/editor/project'
 import { clearFilmstripFramesForObjectUrl } from '@/lib/media/filmstrip-cache'
 import { getObjectUrl, revokeObjectUrl } from '@/lib/media/object-urls'
@@ -30,7 +30,12 @@ import { clamp } from '@/utils/time'
 
 interface EditorActions {
   setProjectName: (name: string) => void
-  markSaved: () => void
+  requestSave: () => void
+  setSaveStatus: (
+    status: EditorUiState['saveStatus'],
+    details?: { lastSavedAt?: string | null; saveError?: string | null },
+  ) => void
+  loadDocument: (document: ProjectDocument, savedAt: string | null) => void
   selectClip: (
     clipId: string | null,
     options?: { additive?: boolean },
@@ -91,7 +96,9 @@ const initialUi: EditorUiState = {
   importError: null,
   importStatus: 'idle',
   playbackError: null,
-  saveStatus: 'unsaved',
+  saveStatus: 'saved',
+  saveError: null,
+  saveRequest: 0,
   lastSavedAt: null,
 }
 
@@ -109,7 +116,7 @@ function commitDocument(
 }
 
 const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
-  document: createEmptyProject('Untitled Project'),
+  document: unloadedProject,
   ui: initialUi,
   clipDrag: null,
 
@@ -122,14 +129,43 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     })
   },
 
-  markSaved: () => {
+  requestSave: () => {
+    set({
+      ui: { ...get().ui, saveRequest: get().ui.saveRequest + 1 },
+    })
+  },
+
+  setSaveStatus: (status, details) => {
     set({
       ui: {
         ...get().ui,
-        saveStatus: 'saved',
-        lastSavedAt: new Date().toISOString(),
+        saveStatus: status,
+        lastSavedAt:
+          details && 'lastSavedAt' in details
+            ? (details.lastSavedAt ?? null)
+            : get().ui.lastSavedAt,
+        saveError:
+          details && 'saveError' in details
+            ? (details.saveError ?? null)
+            : get().ui.saveError,
       },
     })
+  },
+
+  loadDocument: (document, savedAt) => {
+    const temporal = useEditorStore.temporal.getState()
+    temporal.pause()
+    set({
+      document,
+      clipDrag: null,
+      ui: {
+        ...initialUi,
+        saveStatus: 'saved',
+        lastSavedAt: savedAt,
+      },
+    })
+    temporal.clear()
+    temporal.resume()
   },
 
   selectClip: (clipId, options) => {

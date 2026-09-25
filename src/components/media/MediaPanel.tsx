@@ -281,6 +281,11 @@ export function MediaPanel() {
                           </span>
                         )}
                       </span>
+                      {source.availability === 'missing' && !objectUrl && (
+                        <span className="mt-1 block truncate px-0.5 text-[10px] text-fb-subtle">
+                          Unavailable on this device
+                        </span>
+                      )}
                       <span className="mt-1.5 flex items-center gap-1 truncate px-0.5 text-[11px] font-medium text-fb-text">
                         <span className="truncate">{source.name}</span>
                         {source.hasVideo && source.hasAudio && (

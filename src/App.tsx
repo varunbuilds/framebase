@@ -1,5 +1,11 @@
-import { EditorShell } from '@/components/layout/EditorShell'
+import { RouterProvider } from '@tanstack/react-router'
+import { AuthProvider } from '@/features/auth/auth-context'
+import { router } from '@/router'
 
 export default function App() {
-  return <EditorShell />
+  return (
+    <AuthProvider>
+      <RouterProvider router={router} />
+    </AuthProvider>
+  )
 }

@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router'
 import {
   Circle,
   Download,
@@ -11,7 +12,8 @@ export function TopToolbar() {
   const setProjectName = useEditorStore((state) => state.setProjectName)
   const saveStatus = useEditorStore((state) => state.ui.saveStatus)
   const lastSavedAt = useEditorStore((state) => state.ui.lastSavedAt)
-  const markSaved = useEditorStore((state) => state.markSaved)
+  const requestSave = useEditorStore((state) => state.requestSave)
+  const saveError = useEditorStore((state) => state.ui.saveError)
   const togglePlayback = useEditorStore((state) => state.togglePlayback)
   const seekTo = useEditorStore((state) => state.seekTo)
   const pause = useEditorStore((state) => state.pause)
@@ -83,12 +85,12 @@ export function TopToolbar() {
       }
       if (event.key.toLowerCase() === 's') {
         event.preventDefault()
-        markSaved()
+        requestSave()
       }
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [canUndo, canRedo, undo, redo, markSaved, togglePlayback, seekTo, pause])
+  }, [canUndo, canRedo, undo, redo, requestSave, togglePlayback, seekTo, pause])
 
   const beginEditingName = () => {
     setDraftName(projectName)
@@ -103,18 +105,28 @@ export function TopToolbar() {
   }
 
   const statusLabel =
-    saveStatus === 'saved'
-      ? lastSavedAt
-        ? `Saved locally · ${new Date(lastSavedAt).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-          })}`
-        : 'Saved locally'
-      : 'Unsaved local changes'
+    saveStatus === 'saving'
+      ? 'Saving…'
+      : saveStatus === 'error'
+        ? saveError
+          ? `Save failed · ${saveError}`
+          : 'Save failed'
+        : saveStatus === 'saved'
+          ? lastSavedAt
+            ? `Saved · ${new Date(lastSavedAt).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}`
+            : 'Saved'
+          : 'Unsaved changes'
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-fb-border bg-fb-panel px-4">
-      <div className="flex items-center gap-2 pr-2">
+      <Link
+        to="/projects"
+        className="flex items-center gap-2 pr-2 no-underline"
+        title="Projects"
+      >
         <div
           className="flex h-6 w-6 items-center justify-center rounded-[6px] bg-white text-[11px] font-bold tracking-tight text-black"
           aria-hidden
@@ -124,7 +136,7 @@ export function TopToolbar() {
         <span className="text-[13px] font-semibold tracking-tight text-fb-text">
           Framebase
         </span>
-      </div>
+      </Link>
 
       <div className="h-4 w-px bg-fb-border" aria-hidden />
 
@@ -161,7 +173,9 @@ export function TopToolbar() {
           className={
             saveStatus === 'saved'
               ? 'fill-emerald-500 text-emerald-500'
-              : 'fill-amber-500 text-amber-500'
+              : saveStatus === 'error'
+                ? 'fill-fb-danger text-fb-danger'
+                : 'fill-amber-500 text-amber-500'
           }
           aria-hidden
         />
@@ -171,10 +185,10 @@ export function TopToolbar() {
       <div className="ml-auto flex items-center gap-2">
         <button
           type="button"
-          onClick={() => markSaved()}
+          onClick={() => requestSave()}
           className="h-7 rounded-md border border-fb-border bg-white/[0.06] px-2.5 text-[12px] font-medium text-fb-text hover:bg-white/[0.1]"
         >
-          Save locally
+          Save
         </button>
         <button
           type="button"

@@ -15,8 +15,11 @@ export interface EditorUiState {
   importError: string | null
   importStatus: 'idle' | 'importing'
   playbackError: string | null
-  /** Local-only save indicator — not remote sync. */
-  saveStatus: 'unsaved' | 'saved'
+  /** Durable project save status. Playback and UI state are not saved. */
+  saveStatus: 'unsaved' | 'saving' | 'saved' | 'error'
+  saveError: string | null
+  /** Incremented to flush a save immediately. */
+  saveRequest: number
   lastSavedAt: string | null
 }
 

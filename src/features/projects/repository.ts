@@ -1,0 +1,110 @@
+import { getSupabase } from '@/lib/supabase/client'
+import type { ProjectDocument } from '@/types/timeline'
+import {
+  buildNewProjectRecord,
+  durableProjectPayload,
+  readStoredProject,
+  type DurableProjectPayload,
+} from './document'
+
+export class ProjectNotFoundError extends Error {
+  constructor() {
+    super('Project not found')
+    this.name = 'ProjectNotFoundError'
+  }
+}
+
+export type ProjectSummary = {
+  id: string
+  name: string
+  updatedAt: string
+}
+
+export type StoredProject = ProjectSummary & {
+  document: ProjectDocument
+}
+
+type ProjectSummaryRow = {
+  id: string
+  name: string
+  updated_at: string
+}
+
+type ProjectRow = ProjectSummaryRow & {
+  document: DurableProjectPayload
+}
+
+export async function listProjects(): Promise<ProjectSummary[]> {
+  const { data, error } = await getSupabase()
+    .from('projects')
+    .select('id, name, updated_at')
+    .order('updated_at', { ascending: false })
+
+  if (error) throw error
+  return ((data ?? []) as ProjectSummaryRow[]).map((row) => ({
+    id: row.id,
+    name: row.name,
+    updatedAt: row.updated_at,
+  }))
+}
+
+export async function createProject(
+  ownerId: string,
+  name = 'Untitled Project',
+): Promise<StoredProject> {
+  const record = buildNewProjectRecord({ ownerId, name })
+  const { data, error } = await getSupabase()
+    .from('projects')
+    .insert(record.row)
+    .select('id, name, updated_at, document')
+    .single()
+
+  if (error) throw error
+  const row = data as ProjectRow
+  return {
+    id: row.id,
+    name: row.name,
+    updatedAt: row.updated_at,
+    document: readStoredProject(row.document, row.id),
+  }
+}
+
+export async function fetchProject(projectId: string): Promise<StoredProject> {
+  const { data, error } = await getSupabase()
+    .from('projects')
+    .select('id, name, updated_at, document')
+    .eq('id', projectId)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) throw new ProjectNotFoundError()
+  const row = data as ProjectRow
+  return {
+    id: row.id,
+    name: row.name,
+    updatedAt: row.updated_at,
+    document: readStoredProject(row.document, row.id),
+  }
+}
+
+export async function saveProjectDocument(document: ProjectDocument): Promise<void> {
+  const payload = durableProjectPayload(document)
+  const { data, error } = await getSupabase()
+    .from('projects')
+    .update({
+      name: payload.document.name,
+      document: payload,
+    })
+    .eq('id', document.id)
+    .select('id')
+
+  if (error) throw error
+  if (!data || data.length === 0) {
+    throw new Error('Project could not be saved')
+  }
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  const { error } = await getSupabase().from('projects').delete().eq('id', projectId)
+  if (error) throw error
+}
