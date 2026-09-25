@@ -1,75 +1,43 @@
 import type { Clip, MediaSource, ProjectDocument, TimeMs, Track } from '@/types/timeline'
 import { createId } from '@/utils/id'
 import { clamp, clipDurationMs, FRAME_DURATION_MS, snapToFrameMs } from '@/utils/time'
+import { applyOperation, applyOperations, type EditorOperation } from './apply-operation'
 import {
   getClipById,
   getLinkedClips,
   getMediaSourceById,
   getTrackById,
   getTrackContentEndMs,
-  touchDocument,
 } from './project'
+
+export type { EditorOperation } from './apply-operation'
+export { applyOperation, applyOperations } from './apply-operation'
 
 export type OperationResult =
   | { ok: true; document: ProjectDocument; clipId?: string }
   | { ok: false; error: string }
 
-function replaceClip(document: ProjectDocument, nextClip: Clip): ProjectDocument {
-  return touchDocument({
-    ...document,
-    clips: document.clips.map((clip) =>
-      clip.id === nextClip.id ? nextClip : clip,
-    ),
-  })
-}
-
-function replaceClips(
-  document: ProjectDocument,
-  nextClips: Clip[],
-): ProjectDocument {
-  const byId = new Map(nextClips.map((clip) => [clip.id, clip]))
-  return touchDocument({
-    ...document,
-    clips: document.clips.map((clip) => byId.get(clip.id) ?? clip),
-  })
-}
-
 export function addMediaSource(
   document: ProjectDocument,
-  source: Omit<MediaSource, 'id' | 'importedAt'> & { id?: string },
+  source: Omit<MediaSource, 'id' | 'importedAt'> & {
+    id?: string
+    importedAt?: string
+  },
 ): OperationResult {
   const mediaSource: MediaSource = {
     ...source,
     id: source.id ?? createId('media'),
-    importedAt: new Date().toISOString(),
+    importedAt: source.importedAt ?? new Date().toISOString(),
   }
 
-  return {
-    ok: true,
-    document: touchDocument({
-      ...document,
-      mediaSources: [...document.mediaSources, mediaSource],
-    }),
-  }
+  return applyOperation(document, { type: 'media.add', source: mediaSource })
 }
 
 export function removeMediaSource(
   document: ProjectDocument,
   mediaSourceId: string,
 ): OperationResult {
-  const source = getMediaSourceById(document, mediaSourceId)
-  if (!source) {
-    return { ok: false, error: 'Media source not found.' }
-  }
-
-  return {
-    ok: true,
-    document: touchDocument({
-      ...document,
-      mediaSources: document.mediaSources.filter((item) => item.id !== mediaSourceId),
-      clips: document.clips.filter((clip) => clip.mediaSourceId !== mediaSourceId),
-    }),
-  }
+  return applyOperation(document, { type: 'media.remove', mediaSourceId })
 }
 
 export function addClipFromMedia(args: {
@@ -136,14 +104,9 @@ export function addClipFromMedia(args: {
     linkGroupId: args.linkGroupId,
   }
 
-  return {
-    ok: true,
-    clipId: clip.id,
-    document: touchDocument({
-      ...document,
-      clips: [...document.clips, clip],
-    }),
-  }
+  const applied = applyOperation(document, { type: 'clip.add', clip })
+  if (!applied.ok) return applied
+  return { ok: true, clipId: clip.id, document: applied.document }
 }
 
 export type MediaDropPlacement = {
@@ -260,7 +223,12 @@ export function addMediaToTimeline(args: {
     if ('error' in plan) return { ok: false, error: plan.error }
 
     const linkGroupId = plan.placements.length > 1 ? createId('link') : undefined
-    const clips = [...args.document.clips]
+    const operations: EditorOperation[] = []
+    for (const track of plan.tracks) {
+      if (!args.document.tracks.some((item) => item.id === track.id)) {
+        operations.push({ type: 'track.add', track })
+      }
+    }
     const clipIds: string[] = []
     for (const placement of plan.placements) {
       const clip: Clip = {
@@ -273,32 +241,29 @@ export function addMediaToTimeline(args: {
         label: source.name,
         linkGroupId,
       }
-      clips.push(clip)
+      operations.push({ type: 'clip.add', clip })
       clipIds.push(clip.id)
     }
 
+    const applied = applyOperations(args.document, operations)
+    if (!applied.ok) return applied
     return {
       ok: true,
       clipId: clipIds[0],
       clipIds,
-      document: touchDocument({
-        ...args.document,
-        tracks: plan.tracks,
-        clips,
-      }),
+      document: applied.document,
     }
   }
 
-  let timelineStartMs = args.timelineStartMs
-  if (timelineStartMs == null) {
-    let endMs = 0
-    for (const role of roles) {
-      const track = args.document.tracks.find((item) => item.kind === role)
-      if (track) {
-        endMs = Math.max(endMs, getTrackContentEndMs(args.document, track.id))
-      }
+  let timelineStartMs = 0
+  for (const role of roles) {
+    const track = args.document.tracks.find((item) => item.kind === role)
+    if (track) {
+      timelineStartMs = Math.max(
+        timelineStartMs,
+        getTrackContentEndMs(args.document, track.id),
+      )
     }
-    timelineStartMs = endMs
   }
 
   const linkGroupId = roles.length > 1 ? createId('link') : undefined
@@ -330,24 +295,9 @@ export function unlinkClip(
   document: ProjectDocument,
   clipId: string,
 ): OperationResult {
-  const group = getLinkedClips(document, clipId)
-  if (group.length <= 1) {
-    const clip = getClipById(document, clipId)
-    if (!clip) return { ok: false, error: 'Clip not found.' }
-    if (!clip.linkGroupId) return { ok: true, document }
-    return {
-      ok: true,
-      document: replaceClip(document, { ...clip, linkGroupId: undefined }),
-    }
-  }
-
-  return {
-    ok: true,
-    document: replaceClips(
-      document,
-      group.map((clip) => ({ ...clip, linkGroupId: undefined })),
-    ),
-  }
+  const clip = getClipById(document, clipId)
+  if (!clip) return { ok: false, error: 'Clip not found.' }
+  return applyOperation(document, { type: 'clip.unlink', clipIds: [clipId] })
 }
 
 /** Unlink every multi-member group touched by the given clip ids. */
@@ -418,13 +368,11 @@ export function linkClips(
   }
 
   const linkGroupId = createId('link')
-  return {
-    ok: true,
-    document: replaceClips(
-      document,
-      clips.map((clip) => ({ ...clip, linkGroupId })),
-    ),
-  }
+  return applyOperation(document, {
+    type: 'clip.link',
+    clipIds: clips.map((clip) => clip.id),
+    linkGroupId,
+  })
 }
 
 /** True when the selection can form a new video+audio link group. */
@@ -483,21 +431,7 @@ export function deleteClip(
     return { ok: false, error: 'Clip not found.' }
   }
 
-  // Removing one clip leaves partners behind, unlinked.
-  let nextDocument = document
-  if (clip.linkGroupId) {
-    const unlinkResult = unlinkClip(document, clipId)
-    if (!unlinkResult.ok) return unlinkResult
-    nextDocument = unlinkResult.document
-  }
-
-  return {
-    ok: true,
-    document: touchDocument({
-      ...nextDocument,
-      clips: nextDocument.clips.filter((item) => item.id !== clipId),
-    }),
-  }
+  return applyOperation(document, { type: 'clip.delete', clipId })
 }
 
 export function createTrack(args: {
@@ -514,13 +448,7 @@ export function createTrack(args: {
     muted: false,
     locked: false,
   }
-  return {
-    ok: true,
-    document: touchDocument({
-      ...args.document,
-      tracks: [...args.document.tracks, track],
-    }),
-  }
+  return applyOperation(args.document, { type: 'track.add', track })
 }
 
 function rangesOverlap(
@@ -711,7 +639,7 @@ export function planClipMove(args: {
       return { error: 'Clip track not found.' }
     }
 
-    let nextStartMs =
+    const nextStartMs =
       target.id === args.clipId
         ? Math.max(0, Math.round(args.timelineStartMs))
         : Math.max(0, target.timelineStartMs + deltaMs)
@@ -781,42 +709,38 @@ export function pruneEmptyTracks(document: ProjectDocument): ProjectDocument {
     if (used.has(track.id)) keep.add(track.id)
   }
 
-  const nextTracks = document.tracks.filter((track) => keep.has(track.id))
-  if (nextTracks.length === document.tracks.length) return document
+  const removed = document.tracks.filter((track) => !keep.has(track.id))
+  if (removed.length === 0) return document
 
-  return touchDocument({
-    ...document,
-    tracks: nextTracks,
-  })
+  const applied = applyOperations(
+    document,
+    removed.map((track) => ({ type: 'track.remove' as const, trackId: track.id })),
+  )
+  return applied.ok ? applied.document : document
 }
 
 export function applyClipMovePlan(
   document: ProjectDocument,
   plan: ClipMovePlan,
 ): OperationResult {
-  let next = document
-
+  const operations: EditorOperation[] = []
   for (const track of plan.tracks) {
-    if (!next.tracks.some((item) => item.id === track.id)) {
-      next = touchDocument({
-        ...next,
-        tracks: [...next.tracks, track],
-      })
+    if (!document.tracks.some((item) => item.id === track.id)) {
+      operations.push({ type: 'track.add', track })
     }
   }
-
   for (const placement of plan.placements) {
-    const result = moveClip({
-      document: next,
+    operations.push({
+      type: 'clip.move',
       clipId: placement.clipId,
-      timelineStartMs: placement.timelineStartMs,
+      timelineStartMs: Math.max(0, Math.round(placement.timelineStartMs)),
       trackId: placement.trackId,
     })
-    if (!result.ok) return result
-    next = result.document
   }
 
-  return { ok: true, document: pruneEmptyTracks(next) }
+  const applied = applyOperations(document, operations)
+  if (!applied.ok) return applied
+  return { ok: true, document: pruneEmptyTracks(applied.document) }
 }
 
 export function moveClip(args: {
@@ -865,13 +789,12 @@ export function moveClip(args: {
     return { ok: false, error: 'Track is locked.' }
   }
 
-  const nextClip: Clip = {
-    ...clip,
+  return applyOperation(args.document, {
+    type: 'clip.move',
+    clipId: clip.id,
     trackId,
     timelineStartMs: Math.max(0, Math.round(args.timelineStartMs)),
-  }
-
-  return { ok: true, document: replaceClip(args.document, nextClip) }
+  })
 }
 
 /**
@@ -922,14 +845,13 @@ export function trimClip(args: {
 
   timelineStartMs = Math.max(0, timelineStartMs)
 
-  const nextClip: Clip = {
-    ...clip,
+  return applyOperation(args.document, {
+    type: 'clip.trim',
+    clipId: clip.id,
     sourceInMs,
     sourceOutMs,
     timelineStartMs,
-  }
-
-  return { ok: true, document: replaceClip(args.document, nextClip) }
+  })
 }
 
 export function updateClipLabel(
@@ -942,10 +864,11 @@ export function updateClipLabel(
     return { ok: false, error: 'Clip not found.' }
   }
 
-  return {
-    ok: true,
-    document: replaceClip(document, { ...clip, label: label.trim() || clip.label }),
-  }
+  return applyOperation(document, {
+    type: 'clip.relabel',
+    clipId,
+    label: label.trim() || clip.label || '',
+  })
 }
 
 export function renameProject(
@@ -957,13 +880,7 @@ export function renameProject(
     return { ok: false, error: 'Project name cannot be empty.' }
   }
 
-  return {
-    ok: true,
-    document: touchDocument({
-      ...document,
-      name: trimmed,
-    }),
-  }
+  return applyOperation(document, { type: 'project.rename', name: trimmed })
 }
 
 /** One frame. A blade edit must leave at least this much on each side. */
@@ -1003,14 +920,8 @@ export function splitClipAtTime(
     : [anchor]
   const targets = members.filter((clip) => clipContainsCut(clip, cutMs))
   const rightLinkGroupId = targets.length > 1 ? createId('link') : undefined
-
-  let clips = document.clips
-  for (const clip of targets) {
+  const cuts = targets.map((clip) => {
     const offset = cutMs - clip.timelineStartMs
-    const left: Clip = {
-      ...clip,
-      sourceOutMs: clip.sourceInMs + offset,
-    }
     const right: Clip = {
       ...clip,
       id: createId('clip'),
@@ -1018,13 +929,14 @@ export function splitClipAtTime(
       sourceInMs: clip.sourceInMs + offset,
       linkGroupId: rightLinkGroupId,
     }
-    clips = clips.map((item) => (item.id === clip.id ? left : item)).concat(right)
-  }
+    return {
+      clipId: clip.id,
+      sourceOutMs: clip.sourceInMs + offset,
+      right,
+    }
+  })
 
-  return {
-    ok: true,
-    document: touchDocument({ ...document, clips }),
-  }
+  return applyOperation(document, { type: 'clip.split', cuts })
 }
 
 /**

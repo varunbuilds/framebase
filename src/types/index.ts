@@ -2,6 +2,7 @@ export type {
   Clip,
   MediaAvailability,
   MediaKind,
+  MediaLocator,
   MediaSource,
   ProjectDocument,
   SerializableProject,

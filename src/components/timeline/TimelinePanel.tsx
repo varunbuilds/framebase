@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type RefObject,
   type PointerEvent as ReactPointerEvent,
   type DragEvent as ReactDragEvent,
 } from 'react'
@@ -24,6 +25,11 @@ import {
   getTimelineDurationMs,
 } from '@/features/editor/project'
 import { useEditorHistory, useEditorStore } from '@/stores/editor-store'
+import {
+  getFilmstripFrame,
+  hasFilmstripFrame,
+  setFilmstripFrame,
+} from '@/lib/media/filmstrip-cache'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { importLocalMediaFile } from '@/lib/media/import'
 import {
@@ -135,11 +141,6 @@ function trackIdAtClientY(args: {
 
 
 const FILMSTRIP_HEIGHT = 70
-const filmstripCache = new Map<string, string>()
-
-function filmstripKey(src: string, timeMs: number): string {
-  return `${src}|${timeMs}`
-}
 
 /**
  * Premiere/Resolve-style strip: fixed-aspect thumbnails locked to source time.
@@ -189,7 +190,7 @@ function VideoFilmstrip({
     const missing: number[] = []
     for (let slot = startSlot; slot <= endSlot; slot += 1) {
       const timeMs = Math.min(durationMs - 1, Math.round(slot * slotMs + slotMs / 2))
-      if (!filmstripCache.has(filmstripKey(src, timeMs))) missing.push(slot)
+      if (!hasFilmstripFrame(src, timeMs)) missing.push(slot)
     }
     if (missing.length === 0) return
 
@@ -218,8 +219,7 @@ function VideoFilmstrip({
           durationMs - 1,
           Math.round(slot * slotMs + slotMs / 2),
         )
-        const key = filmstripKey(src, timeMs)
-        if (filmstripCache.has(key)) continue
+        if (hasFilmstripFrame(src, timeMs)) continue
         await new Promise<void>((resolve) => {
           const finish = () => resolve()
           video.onseeked = finish
@@ -234,9 +234,9 @@ function VideoFilmstrip({
           }
           video.currentTime = seconds
         })
-        if (cancelled || filmstripCache.has(key)) continue
+        if (cancelled || hasFilmstripFrame(src, timeMs)) continue
         context.drawImage(video, 0, 0, width, height)
-        filmstripCache.set(key, canvas.toDataURL('image/jpeg', 0.86))
+        setFilmstripFrame(src, timeMs, canvas.toDataURL('image/jpeg', 0.86))
         setCacheVersion((version) => version + 1)
       }
     }
@@ -265,7 +265,7 @@ function VideoFilmstrip({
             durationMs - 1,
             Math.round(slot * slotMs + slotMs / 2),
           )
-          const frame = filmstripCache.get(filmstripKey(src, timeMs))
+          const frame = getFilmstripFrame(src, timeMs)
           return (
             <div
               key={slot}
@@ -518,10 +518,78 @@ function TimelineClipBlock({
   )
 }
 
-export function TimelinePanel() {
+function SaveFrameButton({
+  saving,
+  onSave,
+}: {
+  saving: boolean
+  onSave: () => void
+}) {
+  const playheadMs = useEditorStore((state) => state.ui.playheadMs)
   const document = useEditorStore((state) => state.document)
+  const resolution = resolvePlaybackAt(document, playheadMs)
+  const media =
+    resolution.status === 'clip'
+      ? getMediaSourceById(document, resolution.mediaSourceId)
+      : null
+  return (
+    <button
+      type="button"
+      onClick={onSave}
+      disabled={!media?.hasVideo || saving}
+      aria-label="Save current frame"
+      title="Save current frame"
+      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fb-muted hover:enabled:bg-white/[0.06] hover:enabled:text-fb-text disabled:cursor-not-allowed disabled:opacity-35"
+    >
+      <Camera size={15} strokeWidth={1.75} />
+    </button>
+  )
+}
+
+function TimelinePlayhead({
+  viewportRef,
+}: {
+  viewportRef: RefObject<HTMLDivElement | null>
+}) {
   const playheadMs = useEditorStore((state) => state.ui.playheadMs)
   const isPlaying = useEditorStore((state) => state.ui.isPlaying)
+  const pixelsPerSecond = useEditorStore((state) => state.ui.pixelsPerSecond)
+  const playheadLeft = TIMELINE_X_INSET + msToPx(playheadMs, pixelsPerSecond)
+
+  useEffect(() => {
+    if (!isPlaying) return
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const playheadX =
+      LABEL_WIDTH + TIMELINE_X_INSET + msToPx(playheadMs, pixelsPerSecond)
+    const inset = 80
+    if (
+      playheadX < viewport.scrollLeft + LABEL_WIDTH + inset ||
+      playheadX > viewport.scrollLeft + viewport.clientWidth - inset
+    ) {
+      viewport.scrollTo({
+        left: Math.max(
+          0,
+          playheadX - (viewport.clientWidth + LABEL_WIDTH) / 2,
+        ),
+        behavior: 'auto',
+      })
+    }
+  }, [isPlaying, pixelsPerSecond, playheadMs, viewportRef])
+
+  return (
+    <div
+      className="pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-fb-playhead/80"
+      style={{ left: LABEL_WIDTH + playheadLeft }}
+      aria-hidden
+    >
+      <div className="absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-fb-playhead shadow-[0_0_8px_rgba(255,255,255,0.45)]" />
+    </div>
+  )
+}
+
+export function TimelinePanel() {
+  const document = useEditorStore((state) => state.document)
   const pixelsPerSecond = useEditorStore((state) => state.ui.pixelsPerSecond)
   const timelineScrollLeft = useEditorStore(
     (state) => state.ui.timelineScrollLeft,
@@ -601,12 +669,6 @@ export function TimelinePanel() {
   )
   const canUnlinkSelected = canUnlinkClipSelection(document, selectedClipIds)
   const canLinkSelected = canLinkClipSelection(document, selectedClipIds)
-  const frameResolution = resolvePlaybackAt(document, playheadMs)
-  const frameMedia =
-    frameResolution.status === 'clip'
-      ? getMediaSourceById(document, frameResolution.mediaSourceId)
-      : null
-  const canSaveFrame = Boolean(frameMedia?.hasVideo)
   // Always fill the visible tracks area, and leave room past the last clip so
   // the ruler background and track lines cover every tick you can scroll to.
   const contentWidth =
@@ -1318,6 +1380,7 @@ export function TimelinePanel() {
       if (!pan.moved && Math.hypot(dx, dy) > 4) {
         pan.moved = true
         setIsHandDragging(true)
+        setHoverFrameMs(null)
       }
       if (!pan.moved) return
 
@@ -1355,9 +1418,6 @@ export function TimelinePanel() {
 
   const isClipMoving = clipDrag?.mode === 'move'
   useEffect(() => {
-    if (isHandDragging || isClipMoving || clipDrag) setHoverFrameMs(null)
-  }, [clipDrag, isClipMoving, isHandDragging])
-  useEffect(() => {
     const handActive = isHandDragging || Boolean(isClipMoving)
     if (!handActive) return
     const previous = globalThis.document.body.style.cursor
@@ -1386,27 +1446,6 @@ export function TimelinePanel() {
   }, [])
 
   useEffect(() => {
-    if (!isPlaying) return
-    const viewport = bodyScrollRef.current
-    if (!viewport) return
-    const playheadX =
-      LABEL_WIDTH + TIMELINE_X_INSET + msToPx(playheadMs, pixelsPerSecond)
-    const inset = 80
-    if (
-      playheadX < viewport.scrollLeft + LABEL_WIDTH + inset ||
-      playheadX > viewport.scrollLeft + viewport.clientWidth - inset
-    ) {
-      viewport.scrollTo({
-        left: Math.max(
-          0,
-          playheadX - (viewport.clientWidth + LABEL_WIDTH) / 2,
-        ),
-        behavior: 'auto',
-      })
-    }
-  }, [isPlaying, pixelsPerSecond, playheadMs])
-
-  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Backspace' && event.key !== 'Delete') return
       const target = event.target as HTMLElement | null
@@ -1429,7 +1468,6 @@ export function TimelinePanel() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [removeClip, selectedClipIds])
 
-  const playheadLeft = TIMELINE_X_INSET + msToPx(playheadMs, pixelsPerSecond)
   const hoverPlayheadLeft =
     hoverFrameMs == null
       ? null
@@ -1576,16 +1614,10 @@ export function TimelinePanel() {
             )}
           </button>
           <span className="mx-1 h-4 w-px bg-fb-border" aria-hidden />
-          <button
-            type="button"
-            onClick={() => void saveCurrentFrame()}
-            disabled={!canSaveFrame || savingFrame}
-            aria-label="Save current frame"
-            title="Save current frame"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fb-muted hover:enabled:bg-white/[0.06] hover:enabled:text-fb-text disabled:cursor-not-allowed disabled:opacity-35"
-          >
-            <Camera size={15} strokeWidth={1.75} />
-          </button>
+          <SaveFrameButton
+            saving={savingFrame}
+            onSave={() => void saveCurrentFrame()}
+          />
           <span className="mx-1.5 h-4 w-px bg-fb-border" aria-hidden />
           <ZoomOut
             size={12}
@@ -1635,7 +1667,7 @@ export function TimelinePanel() {
           }
           let next = frameAtClientX(event.clientX)
           if (next != null && timelineTool === 'cut') {
-            const playhead = snapToFrameMs(playheadMs)
+            const playhead = snapToFrameMs(useEditorStore.getState().ui.playheadMs)
             const threshold = Math.max(1, pxToMs(12, pixelsPerSecond))
             if (Math.abs(next - playhead) <= threshold) next = playhead
           }
@@ -1827,6 +1859,7 @@ export function TimelinePanel() {
                           dragPreferredTrackIdRef.current = track.id
                           setDragDeltaMs(0)
                           setDragPreferredTrackId(track.id)
+                          setHoverFrameMs(null)
                           setClipDrag({
                             clipId: clip.id,
                             mode: 'move',
@@ -1844,6 +1877,7 @@ export function TimelinePanel() {
                           dragPreferredTrackIdRef.current = undefined
                           setDragDeltaMs(0)
                           setDragPreferredTrackId(undefined)
+                          setHoverFrameMs(null)
                           setClipDrag({
                             clipId: clip.id,
                             mode: edge,
@@ -1934,13 +1968,7 @@ export function TimelinePanel() {
             </div>
           )}
 
-          <div
-            className="pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-fb-playhead/80"
-            style={{ left: LABEL_WIDTH + playheadLeft }}
-            aria-hidden
-          >
-            <div className="absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-fb-playhead shadow-[0_0_8px_rgba(255,255,255,0.45)]" />
-          </div>
+          <TimelinePlayhead viewportRef={bodyScrollRef} />
         </div>
       </div>
     </section>

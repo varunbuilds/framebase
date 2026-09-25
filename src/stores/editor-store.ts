@@ -15,8 +15,14 @@ import {
   updateClipLabel,
 } from '@/features/editor/operations'
 import { getPlaybackEndMs } from '@/features/editor/playback'
-import { createEmptyProject, getLinkedClips } from '@/features/editor/project'
-import { revokeObjectUrl } from '@/lib/media/object-urls'
+import {
+  createEmptyProject,
+  getLinkedClips,
+  projectContentEqual,
+  touchDocument,
+} from '@/features/editor/project'
+import { clearFilmstripFramesForObjectUrl } from '@/lib/media/filmstrip-cache'
+import { getObjectUrl, revokeObjectUrl } from '@/lib/media/object-urls'
 import { clearWaveformPeaks } from '@/lib/media/waveform'
 import type { ClipDragState, EditorUiState } from '@/types/editor'
 import type { MediaSource, ProjectDocument, TimeMs } from '@/types/timeline'
@@ -90,7 +96,16 @@ const initialUi: EditorUiState = {
 }
 
 function documentsEqual(a: ProjectDocument, b: ProjectDocument): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
+  return projectContentEqual(a, b)
+}
+
+/** Save clock lives outside applyOperation so replays stay deterministic. */
+function commitDocument(
+  current: ProjectDocument,
+  next: ProjectDocument,
+): ProjectDocument {
+  if (projectContentEqual(current, next)) return current
+  return touchDocument(next)
 }
 
 const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
@@ -102,7 +117,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     const result = renameProject(get().document, name)
     if (!result.ok) return
     set({
-      document: result.document,
+      document: commitDocument(get().document, result.document),
       ui: { ...get().ui, saveStatus: 'unsaved' },
     })
   },
@@ -297,7 +312,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
       return false
     }
     set({
-      document: result.document,
+      document: commitDocument(get().document, result.document),
       ui: {
         ...get().ui,
         importError: null,
@@ -316,11 +331,13 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
       temporal.resume()
       return false
     }
+    const objectUrl = getObjectUrl(mediaSourceId)
+    if (objectUrl) clearFilmstripFramesForObjectUrl(objectUrl)
     revokeObjectUrl(mediaSourceId)
     clearWaveformPeaks(mediaSourceId)
     const ui = get().ui
     set({
-      document: result.document,
+      document: commitDocument(get().document, result.document),
       ui: {
         ...ui,
         selectedMediaSourceIds: ui.selectedMediaSourceIds.filter(
@@ -348,7 +365,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
       return false
     }
     set({
-      document: result.document,
+      document: commitDocument(get().document, result.document),
       ui: {
         ...get().ui,
         selectedClipIds: result.clipId ? [result.clipId] : [],
@@ -364,7 +381,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     if (!result.ok) return false
     const ui = get().ui
     set({
-      document: result.document,
+      document: commitDocument(get().document, result.document),
       ui: {
         ...ui,
         selectedClipIds: ui.selectedClipIds.filter((id) => id !== clipId),
@@ -384,7 +401,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     })
     if (!result.ok) return false
     set({
-      document: result.document,
+      document: commitDocument(get().document, result.document),
       ui: { ...get().ui, saveStatus: 'unsaved' },
     })
     return true
@@ -425,7 +442,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     }
 
     set({
-      document,
+      document: commitDocument(get().document, document),
       ui: { ...get().ui, saveStatus: 'unsaved' },
     })
     return true
@@ -440,7 +457,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
       return false
     }
     set({
-      document: result.document,
+      document: commitDocument(get().document, result.document),
       ui: { ...get().ui, importError: null, saveStatus: 'unsaved' },
     })
     return true
@@ -452,7 +469,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     const result = unlinkClips(get().document, clipIds)
     if (!result.ok) return false
     set({
-      document: result.document,
+      document: commitDocument(get().document, result.document),
       ui: { ...get().ui, saveStatus: 'unsaved' },
     })
     return true
@@ -463,7 +480,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     const result = splitClipsAtTime(get().document, clipIds, timelineCutMs)
     if (!result.ok) return false
     set({
-      document: result.document,
+      document: commitDocument(get().document, result.document),
       ui: { ...get().ui, saveStatus: 'unsaved' },
     })
     return true
@@ -475,7 +492,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     const result = updateClipLabel(get().document, clipId, label)
     if (!result.ok) return false
     set({
-      document: result.document,
+      document: commitDocument(get().document, result.document),
       ui: { ...get().ui, saveStatus: 'unsaved' },
     })
     return true

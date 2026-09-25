@@ -19,7 +19,8 @@ function avSource(id: string, name: string, durationMs: number): MediaSource {
     hasAudio: true,
     durationMs,
     mimeType: 'video/mp4',
-    availability: 'ready',
+    locator: { kind: 'runtime' },
+    availability: 'available',
     importedAt: '2026-01-01T00:00:00.000Z',
   }
 }

@@ -23,7 +23,8 @@ function media(
   const hasAudio = partial.hasAudio ?? partial.kind === 'audio'
   return {
     mimeType: partial.kind === 'video' ? 'video/mp4' : 'audio/mpeg',
-    availability: 'ready',
+    locator: { kind: 'runtime' },
+    availability: 'available',
     importedAt: '2026-01-01T00:00:00.000Z',
     hasVideo,
     hasAudio,

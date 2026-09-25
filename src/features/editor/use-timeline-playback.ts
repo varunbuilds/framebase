@@ -21,7 +21,6 @@ export function useTimelinePlayback(
 ) {
   const document = useEditorStore((state) => state.document)
   const isPlaying = useEditorStore((state) => state.ui.isPlaying)
-  const playheadMs = useEditorStore((state) => state.ui.playheadMs)
   const setPlayheadMs = useEditorStore((state) => state.setPlayheadMs)
   const pause = useEditorStore((state) => state.pause)
   const setPlaybackError = useEditorStore((state) => state.setPlaybackError)
@@ -29,16 +28,12 @@ export function useTimelinePlayback(
   const attachedMediaIdRef = useRef<string | null>(null)
   const rafRef = useRef<number | null>(null)
   const lastFrameTsRef = useRef<number | null>(null)
-  const playheadRef = useRef(playheadMs)
+  const playheadRef = useRef(useEditorStore.getState().ui.playheadMs)
   const isPlayingRef = useRef(isPlaying)
   const documentRef = useRef<ProjectDocument>(document)
   const appliedSeekVersionRef = useRef(
     useEditorStore.getState().ui.seekVersion,
   )
-
-  useEffect(() => {
-    playheadRef.current = playheadMs
-  }, [playheadMs])
 
   useEffect(() => {
     isPlayingRef.current = isPlaying
@@ -48,53 +43,67 @@ export function useTimelinePlayback(
     documentRef.current = document
   }, [document])
 
-  // When paused, mirror the playhead into the media element (ruler seeks, restart at rest).
-  // While playing, the rAF loop owns media seeking to avoid feedback loops.
+  // Paused seeks update the element through a store subscription so the
+  // playback clock does not rerender this hook's parent every frame.
+  // While playing, the rAF loop owns media seeking.
   useEffect(() => {
-    if (isPlaying) return
+    let detachLoaded: (() => void) | undefined
 
-    const media = mediaRef.current
-    const resolution = resolvePlaybackAt(document, playheadMs)
+    const syncPaused = () => {
+      const { document: doc, ui } = useEditorStore.getState()
+      playheadRef.current = ui.playheadMs
+      if (ui.isPlaying) return
 
-    if (resolution.status !== 'clip') {
-      if (media && !media.paused) media.pause()
-      return
-    }
+      const media = mediaRef.current
+      const resolution = resolvePlaybackAt(doc, ui.playheadMs)
 
-    if (!media) return
-
-    const objectUrl = getObjectUrl(resolution.mediaSourceId)
-    if (!objectUrl) {
-      setPlaybackError('Media file is unavailable for the active clip.')
-      return
-    }
-
-    const applyCurrentTime = () => {
-      media.currentTime = msToSeconds(resolution.sourceTimeMs)
-    }
-
-    if (attachedMediaIdRef.current !== resolution.mediaSourceId) {
-      attachedMediaIdRef.current = resolution.mediaSourceId
-      media.src = objectUrl
-      const onLoaded = () => {
-        applyCurrentTime()
+      if (resolution.status !== 'clip') {
+        if (media && !media.paused) media.pause()
+        return
       }
-      media.addEventListener('loadedmetadata', onLoaded, { once: true })
-      media.load()
-      return () => {
-        media.removeEventListener('loadedmetadata', onLoaded)
+
+      if (!media) return
+
+      const objectUrl = getObjectUrl(resolution.mediaSourceId)
+      if (!objectUrl) {
+        setPlaybackError('Media file is unavailable for the active clip.')
+        return
+      }
+
+      const applyCurrentTime = () => {
+        media.currentTime = msToSeconds(resolution.sourceTimeMs)
+      }
+
+      if (attachedMediaIdRef.current !== resolution.mediaSourceId) {
+        detachLoaded?.()
+        attachedMediaIdRef.current = resolution.mediaSourceId
+        media.src = objectUrl
+        const onLoaded = () => {
+          applyCurrentTime()
+        }
+        media.addEventListener('loadedmetadata', onLoaded, { once: true })
+        detachLoaded = () => {
+          media.removeEventListener('loadedmetadata', onLoaded)
+        }
+        media.load()
+        return
+      }
+
+      if (media.readyState >= 1) {
+        const targetSec = msToSeconds(resolution.sourceTimeMs)
+        if (Math.abs(media.currentTime - targetSec) > SEEK_EPSILON_SEC) {
+          applyCurrentTime()
+        }
       }
     }
 
-    if (media.readyState >= 1) {
-      const targetSec = msToSeconds(resolution.sourceTimeMs)
-      if (Math.abs(media.currentTime - targetSec) > SEEK_EPSILON_SEC) {
-        applyCurrentTime()
-      }
+    syncPaused()
+    const unsubscribe = useEditorStore.subscribe(syncPaused)
+    return () => {
+      unsubscribe()
+      detachLoaded?.()
     }
-
-    return undefined
-  }, [document, playheadMs, isPlaying, mediaRef, setPlaybackError])
+  }, [mediaRef, setPlaybackError])
 
   // Single playback loop — one rAF chain while playing.
   useEffect(() => {

@@ -5,7 +5,28 @@ export type MediaKind = 'video' | 'audio'
 
 export type TrackKind = 'video' | 'audio'
 
-export type MediaAvailability = 'ready' | 'missing' | 'loading' | 'error'
+/**
+ * Document-level media status. This is not a proof that bytes still exist.
+ * `available` means a runtime resource was attached for this session.
+ * `known` means the identity is recorded and bytes are not attached.
+ */
+export type MediaAvailability =
+  | 'known'
+  | 'available'
+  | 'missing'
+  | 'loading'
+  | 'error'
+
+/**
+ * Durable pointer to media bytes. The runtime object URL, File, and media
+ * element are never stored here. `runtime` means the bytes exist only for
+ * this page session and have no storage key yet.
+ */
+export type MediaLocator =
+  | { kind: 'runtime' }
+  | { kind: 'local'; key: string }
+  | { kind: 'opfs'; key: string }
+  | { kind: 'remote'; key: string }
 
 /** Persistent media reference. Bytes and object URLs live outside this model. */
 export interface MediaSource {
@@ -23,6 +44,8 @@ export interface MediaSource {
   height?: number
   sampleRate?: number
   channelCount?: number
+  /** Where durable or session bytes are addressed. Not a blob URL. */
+  locator: MediaLocator
   availability: MediaAvailability
   importedAt: string
 }

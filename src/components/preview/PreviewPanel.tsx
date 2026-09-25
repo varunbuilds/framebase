@@ -5,14 +5,63 @@ import {
   resolvePlaybackAt,
 } from '@/features/editor/playback'
 import { useTimelinePlayback } from '@/features/editor/use-timeline-playback'
-import { getMediaSourceById } from '@/features/editor/project'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { useEditorStore } from '@/stores/editor-store'
 import { formatTimecode, stepPlayheadMs } from '@/utils/time'
 
-export function PreviewPanel() {
+function PreviewTimecode() {
+  const playheadMs = useEditorStore((state) => state.ui.playheadMs)
+  const timelineDurationMs = useEditorStore((state) =>
+    getPlaybackEndMs(state.document),
+  )
+  return (
+    <>
+      {formatTimecode(playheadMs)}
+      <span className="text-fb-subtle"> / </span>
+      {formatTimecode(timelineDurationMs)}
+    </>
+  )
+}
+
+function PreviewGap() {
   const document = useEditorStore((state) => state.document)
   const playheadMs = useEditorStore((state) => state.ui.playheadMs)
+  const timelineDurationMs = getPlaybackEndMs(document)
+  const resolution = resolvePlaybackAt(document, playheadMs)
+  const objectUrl =
+    resolution.status === 'clip'
+      ? getObjectUrl(resolution.mediaSourceId)
+      : undefined
+  const isGap =
+    resolution.status === 'gap' ||
+    resolution.status === 'ended' ||
+    resolution.status === 'empty' ||
+    (resolution.status === 'clip' && !objectUrl)
+
+  if (!isGap) return null
+
+  return (
+    <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#181e22]">
+      <div className="flex flex-col items-center gap-4 text-center">
+        <span className="grid h-14 w-20 place-items-center before:absolute before:h-4 before:w-4 before:border-t before:border-l before:border-white/35 after:absolute after:h-4 after:w-4 after:border-r after:border-b after:border-white/35">
+          <span className="text-xl font-light text-white/60">+</span>
+        </span>
+        <span className="text-[13px] text-white/45">
+          {timelineDurationMs <= 0
+            ? 'Add clips to the active video track'
+            : resolution.status === 'ended'
+              ? 'End of timeline'
+              : 'Gap'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+export function PreviewPanel() {
+  const timelineDurationMs = useEditorStore((state) =>
+    getPlaybackEndMs(state.document),
+  )
   const isPlaying = useEditorStore((state) => state.ui.isPlaying)
   const togglePlayback = useEditorStore((state) => state.togglePlayback)
   const seekTo = useEditorStore((state) => state.seekTo)
@@ -35,7 +84,7 @@ export function PreviewPanel() {
 
   const stepFrame = (frames: number) => {
     if (isPlaying) pause()
-    seekTo(stepPlayheadMs(playheadMs, frames))
+    seekTo(stepPlayheadMs(useEditorStore.getState().ui.playheadMs, frames))
   }
 
   const onVolumeChange = (next: number) => {
@@ -60,26 +109,6 @@ export function PreviewPanel() {
     setMuted(true)
   }
 
-  const timelineDurationMs = getPlaybackEndMs(document)
-  const resolution = resolvePlaybackAt(document, playheadMs)
-
-  const activeMedia =
-    resolution.status === 'clip'
-      ? getMediaSourceById(document, resolution.mediaSourceId)
-      : null
-  const objectUrl =
-    resolution.status === 'clip'
-      ? getObjectUrl(resolution.mediaSourceId)
-      : undefined
-
-  const showMedia =
-    resolution.status === 'clip' && Boolean(objectUrl) && Boolean(activeMedia)
-  const isGap =
-    resolution.status === 'gap' ||
-    resolution.status === 'ended' ||
-    resolution.status === 'empty' ||
-    (resolution.status === 'clip' && !objectUrl)
-
   const VolumeIcon = silent ? VolumeX : volume < 0.5 ? Volume1 : Volume2
 
   return (
@@ -98,36 +127,18 @@ export function PreviewPanel() {
         >
           <video
             ref={mediaRef}
-            className={`h-full w-full object-contain ${showMedia ? 'opacity-100' : 'opacity-0'}`}
+            className="h-full w-full object-contain"
             playsInline
             preload="auto"
             aria-label="Timeline preview"
           />
-
-          {isGap && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#181e22]">
-              <div className="flex flex-col items-center gap-4 text-center">
-                <span className="grid h-14 w-20 place-items-center before:absolute before:h-4 before:w-4 before:border-t before:border-l before:border-white/35 after:absolute after:h-4 after:w-4 after:border-r after:border-b after:border-white/35">
-                  <span className="text-xl font-light text-white/60">+</span>
-                </span>
-                <span className="text-[13px] text-white/45">
-                  {timelineDurationMs <= 0
-                    ? 'Add clips to the active video track'
-                    : resolution.status === 'ended'
-                      ? 'End of timeline'
-                      : 'Gap'}
-                </span>
-              </div>
-            </div>
-          )}
+          <PreviewGap />
         </div>
       </div>
 
       <div className="relative flex h-12 shrink-0 items-center justify-center border-t border-fb-border bg-fb-surface px-4">
         <div className="absolute left-4 font-mono text-[12px] tabular-nums text-fb-text">
-          {formatTimecode(playheadMs)}
-          <span className="text-fb-subtle"> / </span>
-          {formatTimecode(timelineDurationMs)}
+          <PreviewTimecode />
         </div>
         <div className="flex items-center gap-2">
           <button

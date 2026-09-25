@@ -147,7 +147,8 @@ export async function importLocalMediaFile(file: File): Promise<ImportMediaResul
       height: probed.height,
       sampleRate: probed.sampleRate,
       channelCount: probed.channelCount,
-      availability: 'ready',
+      locator: { kind: 'runtime' },
+      availability: 'available',
       importedAt: new Date().toISOString(),
     }
 
