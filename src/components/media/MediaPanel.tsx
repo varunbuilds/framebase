@@ -1,6 +1,7 @@
 import { Film, Music2, Plus, Trash2 } from 'lucide-react'
 import { useRef } from 'react'
 import { importLocalMediaFile, MEDIA_ACCEPT } from '@/lib/media/import'
+import { beginMediaDrag, endMediaDrag } from '@/lib/media/media-drag'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { useEditorStore } from '@/stores/editor-store'
 
@@ -90,18 +91,24 @@ export function MediaPanel() {
                   >
                     <button
                       type="button"
+                      draggable
+                      onDragStart={(event) => {
+                        beginMediaDrag(source.id, event.dataTransfer)
+                      }}
+                      onDragEnd={() => endMediaDrag()}
                       onClick={() => selectMediaSource(source.id)}
                       onDoubleClick={() => addClip(source.id)}
-                      title="Double-click to add to timeline"
-                      className="block w-full text-left"
+                      title="Drag onto the timeline, or double-click to append"
+                      className="block w-full cursor-grab text-left active:cursor-grabbing"
                     >
                       <span className="relative block aspect-video overflow-hidden rounded-[5px] border border-white/[0.08] bg-[#181e22]">
                         {source.kind === 'video' && objectUrl ? (
                           <video
                             src={objectUrl}
-                            className="h-full w-full object-cover"
+                            className="pointer-events-none h-full w-full object-cover"
                             muted
                             preload="metadata"
+                            draggable={false}
                             aria-hidden
                           />
                         ) : (

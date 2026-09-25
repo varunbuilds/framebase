@@ -5,6 +5,7 @@ import {
   canLinkClipSelection,
   canUnlinkClipSelection,
   linkClips,
+  planMediaDrop,
   unlinkClip,
   unlinkClips,
 } from '@/features/editor/operations'
@@ -137,5 +138,61 @@ describe('selection link / unlink', () => {
     expect(
       unlinked.document.clips.every((clip) => !clip.linkGroupId),
     ).toBe(true)
+  })
+
+  it('drops onto the pointer lane at that time, and opens a lane when it overlaps', () => {
+    let document = createEmptyProject('Test')
+    const result = addMediaSource(document, avSource('m1', 'one.mp4', 4000))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    document = result.document
+    const second = addMediaSource(document, avSource('m2', 'two.mp4', 2000))
+    expect(second.ok).toBe(true)
+    if (!second.ok) return
+    document = second.document
+
+    const videoTrack = document.tracks.find((track) => track.kind === 'video')!
+    const first = addMediaToTimeline({ document, mediaSourceId: 'm1' })
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    document = first.document
+
+    const plan = planMediaDrop({
+      document,
+      mediaSourceId: 'm2',
+      timelineStartMs: 500,
+      trackId: videoTrack.id,
+    })
+    expect('error' in plan).toBe(false)
+    if ('error' in plan) return
+    const videoPlacement = plan.placements.find((item) => item.role === 'video')
+    expect(videoPlacement?.timelineStartMs).toBe(500)
+    expect(videoPlacement?.trackId).not.toBe(videoTrack.id)
+    expect(plan.tracks.filter((track) => track.kind === 'video')).toHaveLength(2)
+
+    const dropped = addMediaToTimeline({
+      document,
+      mediaSourceId: 'm2',
+      timelineStartMs: 500,
+      trackId: videoTrack.id,
+    })
+    expect(dropped.ok).toBe(true)
+    if (!dropped.ok) return
+    const placedVideo = dropped.document.clips.find(
+      (clip) =>
+        clip.mediaSourceId === 'm2' &&
+        dropped.document.tracks.find((track) => track.id === clip.trackId)?.kind ===
+          'video',
+    )
+    const placedAudio = dropped.document.clips.find(
+      (clip) =>
+        clip.mediaSourceId === 'm2' &&
+        dropped.document.tracks.find((track) => track.id === clip.trackId)?.kind ===
+          'audio',
+    )
+    expect(placedVideo?.timelineStartMs).toBe(500)
+    expect(placedAudio?.timelineStartMs).toBe(500)
+    expect(placedVideo?.linkGroupId).toBeTruthy()
+    expect(placedVideo?.linkGroupId).toBe(placedAudio?.linkGroupId)
   })
 })

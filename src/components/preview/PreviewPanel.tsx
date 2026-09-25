@@ -65,18 +65,6 @@ export function PreviewPanel() {
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-fb-panel">
-      <div className="flex h-11 shrink-0 items-center justify-between gap-2 px-4">
-        <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
-          Preview
-        </h2>
-        {playbackTrack && (
-          <p className="truncate text-[10px] text-fb-subtle">
-            Playing track: {playbackTrack.name}
-            <span className="text-fb-subtle"> · single-track</span>
-          </p>
-        )}
-      </div>
-
       <div
         className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 sm:p-6"
         style={{ containerType: 'size' }}

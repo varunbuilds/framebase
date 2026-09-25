@@ -45,7 +45,7 @@ interface EditorActions {
   setClipDrag: (drag: ClipDragState | null) => void
   registerMediaSource: (source: MediaSource) => boolean
   unregisterMediaSource: (mediaSourceId: string) => boolean
-  addClip: (mediaSourceId: string, timelineStartMs?: TimeMs) => boolean
+  addClip: (mediaSourceId: string, timelineStartMs?: TimeMs, trackId?: string) => boolean
   removeClip: (clipId: string) => boolean
   moveClipTo: (
     clipId: string,
@@ -336,11 +336,12 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     return true
   },
 
-  addClip: (mediaSourceId, timelineStartMs) => {
+  addClip: (mediaSourceId, timelineStartMs, trackId) => {
     const result = addMediaToTimeline({
       document: get().document,
       mediaSourceId,
       timelineStartMs,
+      trackId,
     })
     if (!result.ok) {
       get().setImportError(result.error)

@@ -6,12 +6,14 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
+  type DragEvent as ReactDragEvent,
 } from 'react'
 import { AudioWaveform } from '@/components/timeline/AudioWaveform'
 import {
   canLinkClipSelection,
   canUnlinkClipSelection,
   planClipMove,
+  planMediaDrop,
   type ClipMovePlan,
 } from '@/features/editor/operations'
 import {
@@ -21,8 +23,15 @@ import {
 } from '@/features/editor/project'
 import { useEditorStore } from '@/stores/editor-store'
 import { getObjectUrl } from '@/lib/media/object-urls'
+import { importLocalMediaFile } from '@/lib/media/import'
+import {
+  draggingMediaSourceId,
+  endMediaDrag,
+  isLibraryMediaDrag,
+  libraryMediaIdFromDrop,
+} from '@/lib/media/media-drag'
 import type { Clip, Track } from '@/types/timeline'
-import { clamp, formatTimecode } from '@/utils/time'
+import { clamp, formatTimecode, snapToFrameMs } from '@/utils/time'
 
 const TRACK_HEIGHT = 104
 const RULER_HEIGHT = 28
@@ -366,6 +375,10 @@ export function TimelinePanel() {
   const unlinkSelectedClips = useEditorStore(
     (state) => state.unlinkSelectedClips,
   )
+  const addClip = useEditorStore((state) => state.addClip)
+  const registerMediaSource = useEditorStore((state) => state.registerMediaSource)
+  const setImportError = useEditorStore((state) => state.setImportError)
+  const setImportStatus = useEditorStore((state) => state.setImportStatus)
 
   /** Single scroller for both axes; ruler sticks to top, labels stick to left. */
   const bodyScrollRef = useRef<HTMLDivElement>(null)
@@ -389,6 +402,14 @@ export function TimelinePanel() {
   const [isHandDragging, setIsHandDragging] = useState(false)
   const suppressClickRef = useRef(false)
   const [viewportWidth, setViewportWidth] = useState(0)
+  const [hoverFrameMs, setHoverFrameMs] = useState<number | null>(null)
+  const [mediaDrop, setMediaDrop] = useState<{
+    mediaSourceId: string | null
+    timelineStartMs: number
+    trackId?: string
+    fileDrop: boolean
+  } | null>(null)
+  const dropPlanSeedRef = useRef<Track[] | undefined>(undefined)
 
   const tracks = getSortedTracks(document)
   const durationMs = getTimelineDurationMs(document)
@@ -443,10 +464,28 @@ export function TimelinePanel() {
     return plan
   }, [clipDrag, document, dragDeltaMs, dragPreferredTrackId])
 
+  const dropPlan = useMemo(() => {
+    if (!mediaDrop?.mediaSourceId) {
+      dropPlanSeedRef.current = undefined
+      return null
+    }
+    const plan = planMediaDrop({
+      document,
+      mediaSourceId: mediaDrop.mediaSourceId,
+      timelineStartMs: mediaDrop.timelineStartMs,
+      trackId: mediaDrop.trackId,
+      seedTracks: dropPlanSeedRef.current,
+    })
+    if ('error' in plan) return null
+    dropPlanSeedRef.current = plan.tracks
+    return plan
+  }, [document, mediaDrop])
+
   const displayTracks = useMemo(() => {
-    if (!movePlan) return tracks
-    return getSortedTracks({ ...document, tracks: movePlan.tracks })
-  }, [document, movePlan, tracks])
+    const overlayTracks = movePlan?.tracks ?? dropPlan?.tracks
+    if (!overlayTracks) return tracks
+    return getSortedTracks({ ...document, tracks: overlayTracks })
+  }, [document, dropPlan, movePlan, tracks])
 
   const placementByClipId = useMemo(() => {
     if (!movePlan) return null
@@ -473,6 +512,145 @@ export function TimelinePanel() {
     },
     [durationMs, pixelsPerSecond, seekTo],
   )
+
+  const frameAtClientX = useCallback(
+    (clientX: number): number | null => {
+      const viewport = bodyScrollRef.current
+      if (!viewport) return null
+      const bounds = viewport.getBoundingClientRect()
+      const localX = clientX - bounds.left
+      if (localX < LABEL_WIDTH) return null
+      const x = localX + viewport.scrollLeft - LABEL_WIDTH - TIMELINE_X_INSET
+      const maxMs = pxToMs(
+        Math.max(0, contentWidth - TIMELINE_X_INSET),
+        pixelsPerSecond,
+      )
+      return clamp(snapToFrameMs(pxToMs(x, pixelsPerSecond)), 0, maxMs)
+    },
+    [contentWidth, pixelsPerSecond],
+  )
+
+  const timelineDropTarget = useCallback(
+    (clientX: number, clientY: number) => {
+      const timelineStartMs = frameAtClientX(clientX)
+      if (timelineStartMs == null) return null
+      const body = bodyScrollRef.current
+      if (!body) return null
+      const mediaSourceId = draggingMediaSourceId()
+      const source = mediaSourceId
+        ? useEditorStore
+            .getState()
+            .document.mediaSources.find((item) => item.id === mediaSourceId)
+        : undefined
+      const kind =
+        source && source.hasVideo && !source.hasAudio
+          ? 'video'
+          : source && source.hasAudio && !source.hasVideo
+            ? 'audio'
+            : undefined
+      const bounds = body.getBoundingClientRect()
+      const trackId = trackIdAtClientY({
+        clientY,
+        bodyTop: bounds.top,
+        scrollTop: body.scrollTop,
+        tracks: displayTracksRef.current,
+        kind,
+      })
+      return { timelineStartMs, trackId, mediaSourceId }
+    },
+    [frameAtClientX],
+  )
+
+  const onTimelineDragOver = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      const fileDrop = event.dataTransfer.types.includes('Files')
+      if (!isLibraryMediaDrag(event.dataTransfer) && !fileDrop) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+      const target = timelineDropTarget(event.clientX, event.clientY)
+      if (!target) {
+        setMediaDrop(null)
+        return
+      }
+      setHoverFrameMs(null)
+      setMediaDrop((current) => {
+        const mediaSourceId = target.mediaSourceId
+        if (
+          current &&
+          current.mediaSourceId === mediaSourceId &&
+          current.timelineStartMs === target.timelineStartMs &&
+          current.trackId === target.trackId &&
+          current.fileDrop === (mediaSourceId == null)
+        ) {
+          return current
+        }
+        return {
+          mediaSourceId,
+          timelineStartMs: target.timelineStartMs,
+          trackId: target.trackId,
+          fileDrop: mediaSourceId == null,
+        }
+      })
+    },
+    [timelineDropTarget],
+  )
+
+  const onTimelineDrop = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      const fileDrop = event.dataTransfer.types.includes('Files')
+      const libraryDrop = isLibraryMediaDrag(event.dataTransfer)
+      if (!libraryDrop && !fileDrop) return
+      event.preventDefault()
+      const target = timelineDropTarget(event.clientX, event.clientY)
+      setMediaDrop(null)
+      dropPlanSeedRef.current = undefined
+      if (!target) {
+        endMediaDrag()
+        return
+      }
+
+      if (libraryDrop) {
+        const mediaSourceId = libraryMediaIdFromDrop(event.dataTransfer)
+        endMediaDrag()
+        if (mediaSourceId) {
+          addClip(mediaSourceId, target.timelineStartMs, target.trackId)
+        }
+        return
+      }
+
+      const files = Array.from(event.dataTransfer.files)
+      endMediaDrag()
+      if (files.length === 0) return
+
+      void (async () => {
+        setImportStatus('importing')
+        setImportError(null)
+        let startMs = target.timelineStartMs
+        for (const file of files) {
+          const result = await importLocalMediaFile(file)
+          if (!result.ok) {
+            setImportError(result.error)
+            continue
+          }
+          registerMediaSource(result.source)
+          addClip(result.source.id, startMs, target.trackId)
+          startMs += result.source.durationMs
+        }
+        setImportStatus('idle')
+      })()
+    },
+    [addClip, registerMediaSource, setImportError, setImportStatus, timelineDropTarget],
+  )
+
+  useEffect(() => {
+    if (!mediaDrop) return
+    const clear = () => {
+      setMediaDrop(null)
+      dropPlanSeedRef.current = undefined
+    }
+    window.addEventListener('dragend', clear)
+    return () => window.removeEventListener('dragend', clear)
+  }, [mediaDrop])
 
   const zoomAtClientX = useCallback(
     (clientX: number, direction: 1 | -1) => {
@@ -692,6 +870,9 @@ export function TimelinePanel() {
 
   const isClipMoving = clipDrag?.mode === 'move'
   useEffect(() => {
+    if (isHandDragging || isClipMoving || clipDrag) setHoverFrameMs(null)
+  }, [clipDrag, isClipMoving, isHandDragging])
+  useEffect(() => {
     const handActive = isHandDragging || Boolean(isClipMoving)
     if (!handActive) return
     const previous = globalThis.document.body.style.cursor
@@ -764,6 +945,10 @@ export function TimelinePanel() {
   }, [removeClip, selectedClipIds])
 
   const playheadLeft = TIMELINE_X_INSET + msToPx(playheadMs, pixelsPerSecond)
+  const hoverPlayheadLeft =
+    hoverFrameMs == null
+      ? null
+      : TIMELINE_X_INSET + msToPx(hoverFrameMs, pixelsPerSecond)
 
   const onResizePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -903,6 +1088,22 @@ export function TimelinePanel() {
           }
           selectClip(null)
         }}
+        onPointerMove={(event) => {
+          if (isHandDragging || isClipMoving || clipDrag || isScrubbingRef.current) {
+            setHoverFrameMs(null)
+            return
+          }
+          const next = frameAtClientX(event.clientX)
+          setHoverFrameMs((current) => (current === next ? current : next))
+        }}
+        onPointerLeave={() => setHoverFrameMs(null)}
+        onDragOver={onTimelineDragOver}
+        onDrop={onTimelineDrop}
+        onDragLeave={(event) => {
+          const next = event.relatedTarget
+          if (next instanceof Node && event.currentTarget.contains(next)) return
+          setMediaDrop(null)
+        }}
         onScroll={(event) => {
           setTimelineScrollLeft(event.currentTarget.scrollLeft)
         }}
@@ -976,7 +1177,11 @@ export function TimelinePanel() {
             {displayTracks.map((track) => (
               <div
                 key={track.id}
-                className="relative border-b border-fb-border bg-fb-surface"
+                className={`relative border-b border-fb-border ${
+                  mediaDrop?.trackId === track.id
+                    ? 'bg-white/[0.045]'
+                    : 'bg-fb-surface'
+                }`}
                 style={{ height: TRACK_HEIGHT }}
                 onPointerDown={(event) => {
                   if (event.target !== event.currentTarget) return
@@ -1071,9 +1276,53 @@ export function TimelinePanel() {
                       />
                     )
                   })}
+                {dropPlan?.placements
+                  .filter((item) => item.trackId === track.id)
+                  .map((item) => (
+                    <div
+                      key={item.role}
+                      className={`pointer-events-none absolute top-1.5 z-10 rounded-md border-2 border-dashed opacity-80 ${
+                        item.role === 'video'
+                          ? 'border-fb-video-border bg-fb-video/50'
+                          : 'border-fb-audio-border bg-fb-audio/50'
+                      }`}
+                      style={{
+                        left:
+                          TIMELINE_X_INSET +
+                          msToPx(item.timelineStartMs, pixelsPerSecond),
+                        width: Math.max(
+                          8,
+                          msToPx(item.durationMs, pixelsPerSecond),
+                        ),
+                        height: 'calc(100% - 12px)',
+                      }}
+                    />
+                  ))}
+                {mediaDrop?.fileDrop && mediaDrop.trackId === track.id && (
+                  <div
+                    className="pointer-events-none absolute top-1.5 z-10 rounded-md border-2 border-dashed border-fb-border-strong bg-white/10"
+                    style={{
+                      left:
+                        TIMELINE_X_INSET +
+                        msToPx(mediaDrop.timelineStartMs, pixelsPerSecond),
+                      width: 96,
+                      height: 'calc(100% - 12px)',
+                    }}
+                  />
+                )}
               </div>
             ))}
           </div>
+
+          {hoverPlayheadLeft != null && (
+            <div
+              className="pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-fb-playhead/35"
+              style={{ left: LABEL_WIDTH + hoverPlayheadLeft }}
+              aria-hidden
+            >
+              <div className="absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-fb-playhead/35" />
+            </div>
+          )}
 
           <div
             className="pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-fb-playhead/80"

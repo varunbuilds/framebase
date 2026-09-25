@@ -146,14 +146,97 @@ export function addClipFromMedia(args: {
   }
 }
 
+export type MediaDropPlacement = {
+  role: Track['kind']
+  trackId: string
+  timelineStartMs: TimeMs
+  durationMs: TimeMs
+}
+
+/**
+ * Where a library item would land if dropped at a time, without overlapping.
+ * The pointer lane is preferred for the matching stream; the partner stream
+ * uses the first free home lane, then a new lane.
+ */
+export function planMediaDrop(args: {
+  document: ProjectDocument
+  mediaSourceId: string
+  timelineStartMs: TimeMs
+  trackId?: string
+  /** Reuse lanes created while the drag preview is live. */
+  seedTracks?: Track[]
+}): { tracks: Track[]; placements: MediaDropPlacement[] } | { error: string } {
+  const source = getMediaSourceById(args.document, args.mediaSourceId)
+  if (!source) return { error: 'Media source not found.' }
+
+  const roles: Track['kind'][] = []
+  if (source.hasVideo) roles.push('video')
+  if (source.hasAudio) roles.push('audio')
+  if (roles.length === 0) return { error: 'Media has no playable streams.' }
+
+  const startMs = Math.max(0, Math.round(args.timelineStartMs))
+  const durationMs = Math.max(0, source.durationMs)
+  const documentTrackIds = new Set(args.document.tracks.map((track) => track.id))
+
+  let tracks = [...args.document.tracks]
+  if (args.seedTracks) {
+    for (const seeded of args.seedTracks) {
+      if (!tracks.some((track) => track.id === seeded.id)) {
+        tracks.push(seeded)
+      }
+    }
+  }
+
+  const dropTrack = args.trackId
+    ? tracks.find((track) => track.id === args.trackId)
+    : undefined
+  let occupied = [...args.document.clips]
+  const placements: MediaDropPlacement[] = []
+
+  for (const role of roles) {
+    const resolved = resolveTrackWithoutOverlap({
+      tracks,
+      occupiedClips: occupied,
+      kind: role,
+      startMs,
+      durationMs,
+      preferredTrackId: dropTrack?.kind === role ? dropTrack.id : undefined,
+      documentTrackIds,
+    })
+    tracks = resolved.tracks
+    occupied = [
+      ...occupied,
+      {
+        id: `drop-${role}`,
+        mediaSourceId: source.id,
+        trackId: resolved.trackId,
+        timelineStartMs: startMs,
+        sourceInMs: 0,
+        sourceOutMs: durationMs,
+        label: source.name,
+      },
+    ]
+    placements.push({
+      role,
+      trackId: resolved.trackId,
+      timelineStartMs: startMs,
+      durationMs,
+    })
+  }
+
+  return { tracks, placements }
+}
+
 /**
  * Place a library item on the timeline after existing clips on each target row.
  * AV files create linked video + audio clips that share a linkGroupId.
+ * A drop time (and optional lane) places the item there without overlapping.
  */
 export function addMediaToTimeline(args: {
   document: ProjectDocument
   mediaSourceId: string
   timelineStartMs?: TimeMs
+  trackId?: string
 }): OperationResult & { clipIds?: string[] } {
   const source = getMediaSourceById(args.document, args.mediaSourceId)
   if (!source) {
@@ -165,6 +248,45 @@ export function addMediaToTimeline(args: {
   if (source.hasAudio) roles.push('audio')
   if (roles.length === 0) {
     return { ok: false, error: 'Media has no playable streams.' }
+  }
+
+  if (args.timelineStartMs != null || args.trackId != null) {
+    const plan = planMediaDrop({
+      document: args.document,
+      mediaSourceId: args.mediaSourceId,
+      timelineStartMs: args.timelineStartMs ?? 0,
+      trackId: args.trackId,
+    })
+    if ('error' in plan) return { ok: false, error: plan.error }
+
+    const linkGroupId = plan.placements.length > 1 ? createId('link') : undefined
+    const clips = [...args.document.clips]
+    const clipIds: string[] = []
+    for (const placement of plan.placements) {
+      const clip: Clip = {
+        id: createId('clip'),
+        mediaSourceId: source.id,
+        trackId: placement.trackId,
+        timelineStartMs: placement.timelineStartMs,
+        sourceInMs: 0,
+        sourceOutMs: source.durationMs,
+        label: source.name,
+        linkGroupId,
+      }
+      clips.push(clip)
+      clipIds.push(clip.id)
+    }
+
+    return {
+      ok: true,
+      clipId: clipIds[0],
+      clipIds,
+      document: touchDocument({
+        ...args.document,
+        tracks: plan.tracks,
+        clips,
+      }),
+    }
   }
 
   let timelineStartMs = args.timelineStartMs

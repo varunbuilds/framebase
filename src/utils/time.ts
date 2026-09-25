@@ -22,6 +22,12 @@ export function stepPlayheadMs(ms: TimeMs, frames: number): TimeMs {
   return Math.max(0, Math.round((frameIndex + frames) * FRAME_DURATION_MS))
 }
 
+/** Nearest frame boundary. Stays on the grid so a hover playhead doesn't slide freely. */
+export function snapToFrameMs(ms: TimeMs): TimeMs {
+  const frameIndex = Math.round(ms / FRAME_DURATION_MS)
+  return Math.max(0, Math.round(frameIndex * FRAME_DURATION_MS))
+}
+
 export function formatTimecode(ms: TimeMs): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000))
   const hours = Math.floor(totalSeconds / 3600)
