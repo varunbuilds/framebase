@@ -384,17 +384,16 @@ function TimelineClipBlock({
       tabIndex={0}
       aria-label={`${title} on ${track.name}`}
       aria-pressed={selected}
-      onClick={(event) => {
-        event.stopPropagation()
-        onSelect(event.metaKey || event.ctrlKey)
-      }}
       onKeyDown={(event) => {
         if (event.key === 'Enter') {
           event.preventDefault()
           onSelect(event.metaKey || event.ctrlKey)
         }
       }}
-      onClick={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation()
+        onSelect(event.metaKey || event.ctrlKey)
+      }}
       onPointerDown={(event) => {
         if (event.button !== 0) return
         const target = event.target as HTMLElement
@@ -405,7 +404,6 @@ function TimelineClipBlock({
           onBlade(event.clientX)
           return
         }
-        onSelect(event.metaKey || event.ctrlKey)
         onPointerDownMove(event.clientX, event.clientY)
       }}
       className={`absolute top-1.5 z-0 flex h-[calc(100%-12px)] flex-col rounded-md border-2 ${
