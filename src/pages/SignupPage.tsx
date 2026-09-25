@@ -5,6 +5,7 @@ import {
   authButtonClass,
   authFieldClass,
 } from '@/components/auth/AuthScreen'
+import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { useAuth } from '@/features/auth/use-auth'
 
 export function SignupPage() {
@@ -101,6 +102,9 @@ export function SignupPage() {
           {pending ? 'Creating account…' : 'Create account'}
         </button>
       </form>
+      <div className="mt-4">
+        <GoogleSignInButton disabled={pending} />
+      </div>
     </AuthScreen>
   )
 }

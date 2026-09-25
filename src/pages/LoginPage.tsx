@@ -5,6 +5,7 @@ import {
   authButtonClass,
   authFieldClass,
 } from '@/components/auth/AuthScreen'
+import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { useAuth } from '@/features/auth/use-auth'
 import { isProjectId } from '@/features/projects/document'
 
@@ -83,6 +84,9 @@ export function LoginPage() {
           {pending ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
+      <div className="mt-4">
+        <GoogleSignInButton redirectTo={redirect} disabled={pending} />
+      </div>
     </AuthScreen>
   )
 }

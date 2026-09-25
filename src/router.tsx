@@ -9,6 +9,7 @@ import {
 import { isSupabaseConfigured } from '@/lib/supabase/client'
 import { readAuthSession } from '@/features/auth/session'
 import { ProjectNotFoundError, fetchProject, listProjects } from '@/features/projects/repository'
+import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
 import { LandingPage } from '@/pages/LandingPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { SignupPage } from '@/pages/SignupPage'
@@ -38,6 +39,19 @@ const loginRoute = createRoute({
     if (session) throw redirect({ to: '/projects' })
   },
   component: LoginPage,
+})
+
+const authCallbackRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/auth/callback',
+  validateSearch: (search: Record<string, unknown>) => ({
+    code: typeof search.code === 'string' ? search.code : '',
+    error: typeof search.error === 'string' ? search.error : '',
+    error_description:
+      typeof search.error_description === 'string' ? search.error_description : '',
+    redirect: typeof search.redirect === 'string' ? search.redirect : '',
+  }),
+  component: AuthCallbackPage,
 })
 
 const signupRoute = createRoute({
@@ -100,6 +114,7 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
   signupRoute,
+  authCallbackRoute,
   authenticatedRoute.addChildren([projectsRoute, editorRoute]),
 ])
 
