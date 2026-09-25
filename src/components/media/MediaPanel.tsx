@@ -40,7 +40,7 @@ export function MediaPanel() {
   }
 
   return (
-    <aside className="flex h-full min-h-0 w-[360px] shrink-0 flex-col overflow-hidden border-r border-fb-border bg-fb-panel">
+    <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-fb-panel">
       <div className="flex h-11 shrink-0 items-center justify-between px-3">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
           Media
