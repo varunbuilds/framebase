@@ -403,11 +403,14 @@ export function TimelinePanel() {
   const canUnlinkSelected = canUnlinkClipSelection(document, selectedClipIds)
   const canLinkSelected = canLinkClipSelection(document, selectedClipIds)
   const showLinkControls = selectedClipIds.length > 0
-  const contentWidth = Math.max(
-    800,
-    viewportWidth,
-    msToPx(durationMs, pixelsPerSecond) + 120,
-  ) + TIMELINE_X_INSET
+  // Always fill the visible tracks area, and leave room past the last clip so
+  // the ruler background and track lines cover every tick you can scroll to.
+  const contentWidth =
+    Math.max(
+      800,
+      viewportWidth,
+      msToPx(durationMs, pixelsPerSecond) + 160,
+    ) + TIMELINE_X_INSET
 
   const primaryDragClip =
     clipDrag != null
@@ -525,13 +528,17 @@ export function TimelinePanel() {
           : pixelsPerSecond >= 40
             ? 2000
             : 5000
-    const visibleDurationMs = pxToMs(viewportWidth, pixelsPerSecond)
-    const rulerEndMs = Math.max(durationMs + stepMs, visibleDurationMs + stepMs)
+    // Stay inside the painted content so ticks can't widen the scroll area
+    // past the ruler background and track lines.
+    const rulerEndMs = pxToMs(
+      Math.max(0, contentWidth - TIMELINE_X_INSET),
+      pixelsPerSecond,
+    )
     for (let ms = 0; ms <= rulerEndMs; ms += stepMs) {
       marks.push({ ms, major: ms % (stepMs * 2) === 0 || stepMs >= 2000 })
     }
     return marks
-  }, [durationMs, pixelsPerSecond, viewportWidth])
+  }, [contentWidth, pixelsPerSecond])
 
   const commitDrag = useCallback(() => {
     const drag = useEditorStore.getState().clipDrag
