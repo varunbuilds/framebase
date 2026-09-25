@@ -1,9 +1,8 @@
-import { ChevronLeft, ChevronRight, Pause, Play, SkipBack, SkipForward } from 'lucide-react'
-import { useMemo, useRef } from 'react'
+import { ChevronLeft, ChevronRight, Pause, Play, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import {
   getPlaybackEndMs,
   resolvePlaybackAt,
-  resolvePlaybackTrack,
 } from '@/features/editor/playback'
 import { useTimelinePlayback } from '@/features/editor/use-timeline-playback'
 import { getMediaSourceById } from '@/features/editor/project'
@@ -15,23 +14,52 @@ export function PreviewPanel() {
   const document = useEditorStore((state) => state.document)
   const playheadMs = useEditorStore((state) => state.ui.playheadMs)
   const isPlaying = useEditorStore((state) => state.ui.isPlaying)
-  const playbackError = useEditorStore((state) => state.ui.playbackError)
   const togglePlayback = useEditorStore((state) => state.togglePlayback)
   const seekTo = useEditorStore((state) => state.seekTo)
   const pause = useEditorStore((state) => state.pause)
 
   const mediaRef = useRef<HTMLVideoElement>(null)
+  const lastAudibleVolumeRef = useRef(1)
+  const [volume, setVolume] = useState(1)
+  const [muted, setMuted] = useState(false)
   useTimelinePlayback(mediaRef)
+
+  const silent = muted || volume === 0
+
+  useEffect(() => {
+    const media = mediaRef.current
+    if (!media) return
+    media.volume = volume
+    media.muted = silent
+  }, [silent, volume])
 
   const stepFrame = (frames: number) => {
     if (isPlaying) pause()
     seekTo(stepPlayheadMs(playheadMs, frames))
   }
 
-  const playbackTrack = useMemo(
-    () => resolvePlaybackTrack(document),
-    [document],
-  )
+  const onVolumeChange = (next: number) => {
+    setVolume(next)
+    if (next === 0) {
+      setMuted(true)
+      return
+    }
+    lastAudibleVolumeRef.current = next
+    setMuted(false)
+  }
+
+  const toggleMute = () => {
+    if (silent) {
+      const restore = lastAudibleVolumeRef.current || 1
+      setVolume(restore)
+      setMuted(false)
+      return
+    }
+    if (volume > 0) lastAudibleVolumeRef.current = volume
+    setVolume(0)
+    setMuted(true)
+  }
+
   const timelineDurationMs = getPlaybackEndMs(document)
   const resolution = resolvePlaybackAt(document, playheadMs)
 
@@ -52,16 +80,7 @@ export function PreviewPanel() {
     resolution.status === 'empty' ||
     (resolution.status === 'clip' && !objectUrl)
 
-  const statusLabel = (() => {
-    if (playbackError) return playbackError
-    if (!playbackTrack) return 'No playback track'
-    if (timelineDurationMs <= 0) return 'Timeline is empty'
-    if (resolution.status === 'gap') return 'Gap'
-    if (resolution.status === 'ended') return 'End of timeline'
-    if (resolution.status === 'clip' && activeMedia) return activeMedia.name
-    if (resolution.status === 'clip' && !objectUrl) return 'Media unavailable'
-    return playbackTrack.name
-  })()
+  const VolumeIcon = silent ? VolumeX : volume < 0.5 ? Volume1 : Volume2
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-fb-panel">
@@ -166,14 +185,31 @@ export function PreviewPanel() {
             <SkipForward size={15} strokeWidth={1.75} />
           </button>
         </div>
-        <p
-          className={`absolute right-4 max-w-[30%] truncate text-[11px] ${
-            playbackError ? 'text-fb-danger' : 'text-fb-muted'
-          }`}
-          role={playbackError ? 'alert' : undefined}
-        >
-          {statusLabel}
-        </p>
+        <div className="absolute right-4 flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={toggleMute}
+            aria-label={silent ? 'Unmute' : 'Mute'}
+            aria-pressed={silent}
+            title={silent ? 'Unmute' : 'Mute'}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-white/65 hover:bg-white/[0.08]"
+          >
+            <VolumeIcon size={15} strokeWidth={1.75} />
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={volume}
+            onChange={(event) => onVolumeChange(Number(event.target.value))}
+            aria-label="Volume"
+            aria-valuetext={silent ? 'Muted' : `${Math.round(volume * 100)}%`}
+            title="Volume"
+            style={{ ['--volume-pct' as string]: `${volume * 100}%` }}
+            className="volume-slider"
+          />
+        </div>
       </div>
     </section>
   )

@@ -1,6 +1,6 @@
 import type { Clip, MediaSource, ProjectDocument, TimeMs, Track } from '@/types/timeline'
 import { createId } from '@/utils/id'
-import { clamp, clipDurationMs } from '@/utils/time'
+import { clamp, clipDurationMs, FRAME_DURATION_MS, snapToFrameMs } from '@/utils/time'
 import {
   getClipById,
   getLinkedClips,
@@ -964,6 +964,102 @@ export function renameProject(
       name: trimmed,
     }),
   }
+}
+
+/** One frame. A blade edit must leave at least this much on each side. */
+const MIN_SPLIT_MS = Math.round(FRAME_DURATION_MS)
+
+function clipContainsCut(clip: Clip, cutMs: TimeMs): boolean {
+  const { timelineEndMs } = getClipPlaybackRange(clip)
+  return (
+    cutMs >= clip.timelineStartMs + MIN_SPLIT_MS &&
+    cutMs <= timelineEndMs - MIN_SPLIT_MS
+  )
+}
+
+/**
+ * Razor a clip at a timeline time. Linked partners that also contain that
+ * time are cut together: the left pieces keep the original link, and the
+ * right pieces stay linked to each other as a new pair.
+ */
+export function splitClipAtTime(
+  document: ProjectDocument,
+  clipId: string,
+  timelineCutMs: TimeMs,
+): OperationResult {
+  const anchor = getClipById(document, clipId)
+  if (!anchor) return { ok: false, error: 'Clip not found.' }
+
+  const cutMs = snapToFrameMs(timelineCutMs)
+  if (!clipContainsCut(anchor, cutMs)) {
+    return {
+      ok: false,
+      error: 'The cut must sit at least one frame inside the clip.',
+    }
+  }
+
+  const members = anchor.linkGroupId
+    ? getLinkedClips(document, anchor.id)
+    : [anchor]
+  const targets = members.filter((clip) => clipContainsCut(clip, cutMs))
+  const rightLinkGroupId = targets.length > 1 ? createId('link') : undefined
+
+  let clips = document.clips
+  for (const clip of targets) {
+    const offset = cutMs - clip.timelineStartMs
+    const left: Clip = {
+      ...clip,
+      sourceOutMs: clip.sourceInMs + offset,
+    }
+    const right: Clip = {
+      ...clip,
+      id: createId('clip'),
+      timelineStartMs: cutMs,
+      sourceInMs: clip.sourceInMs + offset,
+      linkGroupId: rightLinkGroupId,
+    }
+    clips = clips.map((item) => (item.id === clip.id ? left : item)).concat(right)
+  }
+
+  return {
+    ok: true,
+    document: touchDocument({ ...document, clips }),
+  }
+}
+
+/**
+ * Split each clip at one timeline time. Members of the same link group are
+ * cut once, so a linked pair is not split twice.
+ */
+export function splitClipsAtTime(
+  document: ProjectDocument,
+  clipIds: string[],
+  timelineCutMs: TimeMs,
+): OperationResult {
+  const seen = new Set<string>()
+  let next = document
+  let splitAny = false
+
+  for (const clipId of clipIds) {
+    const clip = getClipById(next, clipId)
+    if (!clip) continue
+    const key = clip.linkGroupId ?? clip.id
+    if (seen.has(key)) continue
+    seen.add(key)
+    const result = splitClipAtTime(next, clip.id, timelineCutMs)
+    if (!result.ok) continue
+    next = result.document
+    splitAny = true
+  }
+
+  if (!splitAny) {
+    return {
+      ok: false,
+      error: 'The cut must sit at least one frame inside a clip.',
+    }
+  }
+
+  return { ok: true, document: next }
 }
 
 export function getClipPlaybackRange(clip: Clip): {

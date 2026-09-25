@@ -6,6 +6,7 @@ import {
   canUnlinkClipSelection,
   linkClips,
   planMediaDrop,
+  splitClipAtTime,
   unlinkClip,
   unlinkClips,
 } from '@/features/editor/operations'
@@ -194,5 +195,78 @@ describe('selection link / unlink', () => {
     expect(placedAudio?.timelineStartMs).toBe(500)
     expect(placedVideo?.linkGroupId).toBeTruthy()
     expect(placedVideo?.linkGroupId).toBe(placedAudio?.linkGroupId)
+  })
+})
+
+describe('splitClipAtTime', () => {
+  it('splits a linked pair at the blade time and keeps each side linked', () => {
+    let document = createEmptyProject('Test')
+    const result = addMediaSource(document, avSource('m1', 'one.mp4', 2000))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    document = result.document
+
+    const placed = addMediaToTimeline({ document, mediaSourceId: 'm1' })
+    expect(placed.ok).toBe(true)
+    if (!placed.ok) return
+    document = placed.document
+
+    const video = document.clips.find((clip) => {
+      const track = document.tracks.find((item) => item.id === clip.trackId)
+      return track?.kind === 'video'
+    })
+    expect(video).toBeTruthy()
+    if (!video) return
+
+    const split = splitClipAtTime(document, video.id, 1000)
+    expect(split.ok).toBe(true)
+    if (!split.ok) return
+    document = split.document
+
+    expect(document.clips).toHaveLength(4)
+    const videos = document.clips.filter((clip) => {
+      const track = document.tracks.find((item) => item.id === clip.trackId)
+      return track?.kind === 'video'
+    })
+    const audios = document.clips.filter((clip) => {
+      const track = document.tracks.find((item) => item.id === clip.trackId)
+      return track?.kind === 'audio'
+    })
+    expect(videos.map((clip) => clip.timelineStartMs).sort((a, b) => a - b)).toEqual([
+      0, 1000,
+    ])
+    expect(audios.map((clip) => clip.timelineStartMs).sort((a, b) => a - b)).toEqual([
+      0, 1000,
+    ])
+
+    const leftVideo = videos.find((clip) => clip.timelineStartMs === 0)
+    const rightVideo = videos.find((clip) => clip.timelineStartMs === 1000)
+    const leftAudio = audios.find((clip) => clip.timelineStartMs === 0)
+    const rightAudio = audios.find((clip) => clip.timelineStartMs === 1000)
+    expect(leftVideo?.sourceOutMs).toBe(1000)
+    expect(rightVideo?.sourceInMs).toBe(1000)
+    expect(rightVideo?.sourceOutMs).toBe(2000)
+    expect(leftVideo?.linkGroupId).toBe(leftAudio?.linkGroupId)
+    expect(rightVideo?.linkGroupId).toBe(rightAudio?.linkGroupId)
+    expect(leftVideo?.linkGroupId).not.toBe(rightVideo?.linkGroupId)
+  })
+
+  it('refuses a cut on the first or last frame', () => {
+    let document = createEmptyProject('Test')
+    const result = addMediaSource(document, avSource('m1', 'one.mp4', 2000))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    document = result.document
+    const placed = addMediaToTimeline({ document, mediaSourceId: 'm1' })
+    expect(placed.ok).toBe(true)
+    if (!placed.ok) return
+    document = placed.document
+    const video = document.clips[0]
+    expect(video).toBeTruthy()
+    if (!video) return
+
+    const split = splitClipAtTime(document, video.id, video.timelineStartMs)
+    expect(split.ok).toBe(false)
+    expect(document.clips).toHaveLength(2)
   })
 })

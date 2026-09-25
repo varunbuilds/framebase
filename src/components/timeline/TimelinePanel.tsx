@@ -1,4 +1,4 @@
-import { Film, Link2, Link2Off, Music2, ZoomIn, ZoomOut } from 'lucide-react'
+import { Camera, Film, Link2, Link2Off, MousePointer2, Music2, Redo2, Scissors, Undo2, ZoomIn, ZoomOut } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -12,16 +12,18 @@ import { AudioWaveform } from '@/components/timeline/AudioWaveform'
 import {
   canLinkClipSelection,
   canUnlinkClipSelection,
+  getClipPlaybackRange,
   planClipMove,
   planMediaDrop,
   type ClipMovePlan,
 } from '@/features/editor/operations'
+import { resolvePlaybackAt } from '@/features/editor/playback'
 import {
   getMediaSourceById,
   getSortedTracks,
   getTimelineDurationMs,
 } from '@/features/editor/project'
-import { useEditorStore } from '@/stores/editor-store'
+import { useEditorHistory, useEditorStore } from '@/stores/editor-store'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { importLocalMediaFile } from '@/lib/media/import'
 import {
@@ -32,7 +34,8 @@ import {
   libraryMediaIdsFromDrop,
 } from '@/lib/media/media-drag'
 import type { Clip, Track } from '@/types/timeline'
-import { clamp, formatFrameClock, formatSignedFrameClock, formatTimecode, FRAME_DURATION_MS, snapToFrameMs } from '@/utils/time'
+import { downloadVideoFrame } from '@/lib/media/save-frame'
+import { clamp, formatFrameClock, formatSignedFrameClock, formatTimecode, FRAME_DURATION_MS, msToSeconds, snapToFrameMs } from '@/utils/time'
 
 const TRACK_HEIGHT = 104
 const RULER_HEIGHT = 28
@@ -295,9 +298,11 @@ function TimelineClipBlock({
   dragDeltaMs,
   previewTimelineStartMs,
   isMoving,
+  blade,
   onSelect,
   onPointerDownMove,
   onPointerDownTrim,
+  onBlade,
 }: {
   clip: Clip
   track: Track
@@ -308,9 +313,11 @@ function TimelineClipBlock({
   /** When set (live move plan), overrides timeline start instead of delta. */
   previewTimelineStartMs?: number
   isMoving: boolean
+  blade: boolean
   onSelect: (additive: boolean) => void
   onPointerDownMove: (clientX: number, clientY: number) => void
   onPointerDownTrim: (edge: 'trim-in' | 'trim-out', clientX: number) => void
+  onBlade: (clientX: number) => void
 }) {
   const document = useEditorStore((state) => state.document)
   const media = getMediaSourceById(document, clip.mediaSourceId)
@@ -387,18 +394,26 @@ function TimelineClipBlock({
           onSelect(event.metaKey || event.ctrlKey)
         }
       }}
+      onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => {
         if (event.button !== 0) return
         const target = event.target as HTMLElement
-        if (target.closest('[data-trim]')) return
+        if (!blade && target.closest('[data-trim]')) return
         event.stopPropagation()
+        if (blade) {
+          event.preventDefault()
+          onBlade(event.clientX)
+          return
+        }
         onSelect(event.metaKey || event.ctrlKey)
         onPointerDownMove(event.clientX, event.clientY)
       }}
       className={`absolute top-1.5 z-0 flex h-[calc(100%-12px)] flex-col rounded-md border-2 ${
         isMoving
           ? 'z-10 cursor-grabbing border-dashed opacity-90 shadow-[0_10px_28px_rgba(0,0,0,0.45)]'
-          : 'cursor-default'
+          : blade
+            ? 'cursor-crosshair'
+            : 'cursor-default'
       } ${isVideo ? 'bg-[#151c22]' : 'bg-[#13241f]'} ${
         trimmingEdge
           ? 'z-10 border-[#7dffb2]'
@@ -474,6 +489,11 @@ function TimelineClipBlock({
         }`}
         onPointerDown={(event) => {
           event.stopPropagation()
+          event.preventDefault()
+          if (blade) {
+            onBlade(event.clientX)
+            return
+          }
           onSelect(event.metaKey || event.ctrlKey)
           onPointerDownTrim('trim-in', event.clientX)
         }}
@@ -487,6 +507,11 @@ function TimelineClipBlock({
         }`}
         onPointerDown={(event) => {
           event.stopPropagation()
+          event.preventDefault()
+          if (blade) {
+            onBlade(event.clientX)
+            return
+          }
           onSelect(event.metaKey || event.ctrlKey)
           onPointerDownTrim('trim-out', event.clientX)
         }}
@@ -523,6 +548,9 @@ export function TimelinePanel() {
   const unlinkSelectedClips = useEditorStore(
     (state) => state.unlinkSelectedClips,
   )
+  const splitClipsAt = useEditorStore((state) => state.splitClipsAt)
+  const pause = useEditorStore((state) => state.pause)
+  const { undo, redo, canUndo, canRedo } = useEditorHistory()
   const addClip = useEditorStore((state) => state.addClip)
   const registerMediaSource = useEditorStore((state) => state.registerMediaSource)
   const setImportError = useEditorStore((state) => state.setImportError)
@@ -553,6 +581,8 @@ export function TimelinePanel() {
   const suppressClickRef = useRef(false)
   const [viewportWidth, setViewportWidth] = useState(0)
   const [hoverFrameMs, setHoverFrameMs] = useState<number | null>(null)
+  const [timelineTool, setTimelineTool] = useState<'select' | 'cut'>('select')
+  const [savingFrame, setSavingFrame] = useState(false)
   const [mediaDrop, setMediaDrop] = useState<{
     mediaSourceIds: string[]
     timelineStartMs: number
@@ -573,7 +603,12 @@ export function TimelinePanel() {
   )
   const canUnlinkSelected = canUnlinkClipSelection(document, selectedClipIds)
   const canLinkSelected = canLinkClipSelection(document, selectedClipIds)
-  const showLinkControls = selectedClipIds.length > 0
+  const frameResolution = resolvePlaybackAt(document, playheadMs)
+  const frameMedia =
+    frameResolution.status === 'clip'
+      ? getMediaSourceById(document, frameResolution.mediaSourceId)
+      : null
+  const canSaveFrame = Boolean(frameMedia?.hasVideo)
   // Always fill the visible tracks area, and leave room past the last clip so
   // the ruler background and track lines cover every tick you can scroll to.
   const contentWidth =
@@ -717,6 +752,119 @@ export function TimelinePanel() {
     },
     [contentWidth, pixelsPerSecond],
   )
+
+  const cutTimeAtClientX = useCallback(
+    (clientX: number): number | null => {
+      const frame = frameAtClientX(clientX)
+      if (frame == null) return null
+      const playhead = snapToFrameMs(useEditorStore.getState().ui.playheadMs)
+      const threshold = Math.max(1, pxToMs(12, pixelsPerSecond))
+      if (Math.abs(frame - playhead) <= threshold) return playhead
+      return frame
+    },
+    [frameAtClientX, pixelsPerSecond],
+  )
+
+  const splitAtPlayhead = useCallback(() => {
+    const time = snapToFrameMs(useEditorStore.getState().ui.playheadMs)
+    const doc = useEditorStore.getState().document
+    const selected = useEditorStore.getState().ui.selectedClipIds
+    const under = doc.clips.filter((clip) => {
+      const { timelineEndMs } = getClipPlaybackRange(clip)
+      return time > clip.timelineStartMs && time < timelineEndMs
+    })
+    const chosen =
+      selected.length > 0
+        ? under.filter((clip) => selected.includes(clip.id))
+        : under
+    if (chosen.length === 0) return
+    splitClipsAt(
+      chosen.map((clip) => clip.id),
+      time,
+    )
+  }, [splitClipsAt])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const typing =
+        target != null &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      if (typing) return
+
+      const meta = event.metaKey || event.ctrlKey
+      if (meta && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        splitAtPlayhead()
+        return
+      }
+      if (meta || event.altKey) return
+      if (event.key.toLowerCase() === 'v') {
+        event.preventDefault()
+        setTimelineTool('select')
+      }
+      if (event.key.toLowerCase() === 'c') {
+        event.preventDefault()
+        setTimelineTool('cut')
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [splitAtPlayhead])
+
+  const saveCurrentFrame = useCallback(async () => {
+    const state = useEditorStore.getState()
+    const time = snapToFrameMs(state.ui.playheadMs)
+    const resolution = resolvePlaybackAt(state.document, time)
+    if (resolution.status !== 'clip') return
+    const media = getMediaSourceById(state.document, resolution.mediaSourceId)
+    if (!media?.hasVideo) return
+
+    const video = globalThis.document.querySelector(
+      'video[aria-label="Timeline preview"]',
+    )
+    if (!(video instanceof HTMLVideoElement)) return
+
+    if (state.ui.isPlaying) pause()
+    video.pause()
+
+    const safeName =
+      state.document.name.replace(/[^\w\- ]+/g, '').trim() || 'frame'
+    const filename = `${safeName} ${formatFrameClock(time).replaceAll(':', '-')}.png`
+
+    setSavingFrame(true)
+    try {
+      const objectUrl = getObjectUrl(resolution.mediaSourceId)
+      if (objectUrl && video.currentSrc !== objectUrl) {
+        video.src = objectUrl
+        await new Promise<void>((resolve, reject) => {
+          const onReady = () => {
+            video.removeEventListener('loadedmetadata', onReady)
+            video.removeEventListener('error', onError)
+            resolve()
+          }
+          const onError = () => {
+            video.removeEventListener('loadedmetadata', onReady)
+            video.removeEventListener('error', onError)
+            reject(new Error('Could not read the current frame.'))
+          }
+          video.addEventListener('loadedmetadata', onReady)
+          video.addEventListener('error', onError)
+        })
+      }
+      await downloadVideoFrame(
+        video,
+        msToSeconds(resolution.sourceTimeMs),
+        filename,
+      )
+    } catch {
+      useEditorStore.getState().setPlaybackError('Could not save the current frame.')
+    } finally {
+      setSavingFrame(false)
+    }
+  }, [pause])
 
   const timelineDropTarget = useCallback(
     (clientX: number, clientY: number) => {
@@ -1344,7 +1492,57 @@ export function TimelinePanel() {
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
           Timeline
         </h2>
-        {showLinkControls && (
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setTimelineTool('select')}
+            aria-label="Select tool"
+            aria-pressed={timelineTool === 'select'}
+            title="Select (V)"
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-md ${
+              timelineTool === 'select'
+                ? 'bg-white/[0.12] text-fb-text'
+                : 'text-fb-muted hover:bg-white/[0.06] hover:text-fb-text'
+            }`}
+          >
+            <MousePointer2 size={15} strokeWidth={1.75} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setTimelineTool('cut')}
+            aria-label="Cut tool"
+            aria-pressed={timelineTool === 'cut'}
+            title="Cut. Click a clip to split it (C). Ctrl+K or ⌘K splits at the playhead"
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-md ${
+              timelineTool === 'cut'
+                ? 'bg-white/[0.12] text-fb-text'
+                : 'text-fb-muted hover:bg-white/[0.06] hover:text-fb-text'
+            }`}
+          >
+            <Scissors size={15} strokeWidth={1.75} />
+          </button>
+          <span className="mx-1 h-4 w-px bg-fb-border" aria-hidden />
+          <button
+            type="button"
+            onClick={() => undo()}
+            disabled={!canUndo}
+            aria-label="Undo"
+            title="Undo (⌘Z)"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fb-muted hover:enabled:bg-white/[0.06] hover:enabled:text-fb-text disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <Undo2 size={15} strokeWidth={1.75} />
+          </button>
+          <button
+            type="button"
+            onClick={() => redo()}
+            disabled={!canRedo}
+            aria-label="Redo"
+            title="Redo (⇧⌘Z)"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fb-muted hover:enabled:bg-white/[0.06] hover:enabled:text-fb-text disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <Redo2 size={15} strokeWidth={1.75} />
+          </button>
+          <span className="mx-1 h-4 w-px bg-fb-border" aria-hidden />
           <button
             type="button"
             onClick={() => {
@@ -1356,24 +1554,28 @@ export function TimelinePanel() {
             title={
               canUnlinkSelected
                 ? 'Unlink selected clips'
-                : 'Link selected video and audio clips (Cmd/Ctrl+click to multi-select)'
+                : 'Link selected video and audio clips'
             }
-            className="inline-flex h-7 items-center gap-1 rounded-md border border-fb-border px-2 text-[11px] text-fb-muted disabled:cursor-not-allowed disabled:opacity-35 hover:enabled:bg-white/[0.06] hover:enabled:text-fb-text"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fb-muted hover:enabled:bg-white/[0.06] hover:enabled:text-fb-text disabled:cursor-not-allowed disabled:opacity-35"
           >
             {canUnlinkSelected ? (
-              <>
-                <Link2Off size={12} strokeWidth={1.75} />
-                Unlink
-              </>
+              <Link2Off size={15} strokeWidth={1.75} />
             ) : (
-              <>
-                <Link2 size={12} strokeWidth={1.75} />
-                Link
-              </>
+              <Link2 size={15} strokeWidth={1.75} />
             )}
           </button>
-        )}
-        <div className="ml-auto flex items-center gap-2">
+          <span className="mx-1 h-4 w-px bg-fb-border" aria-hidden />
+          <button
+            type="button"
+            onClick={() => void saveCurrentFrame()}
+            disabled={!canSaveFrame || savingFrame}
+            aria-label="Save current frame"
+            title="Save current frame"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fb-muted hover:enabled:bg-white/[0.06] hover:enabled:text-fb-text disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <Camera size={15} strokeWidth={1.75} />
+          </button>
+          <span className="mx-1.5 h-4 w-px bg-fb-border" aria-hidden />
           <ZoomOut
             size={12}
             strokeWidth={1.75}
@@ -1408,6 +1610,7 @@ export function TimelinePanel() {
           isHandDragging || isClipMoving ? 'cursor-grabbing' : 'cursor-default'
         }`}
         onClick={() => {
+          if (timelineTool === 'cut') return
           if (suppressClickRef.current) {
             suppressClickRef.current = false
             return
@@ -1419,7 +1622,12 @@ export function TimelinePanel() {
             setHoverFrameMs(null)
             return
           }
-          const next = frameAtClientX(event.clientX)
+          let next = frameAtClientX(event.clientX)
+          if (next != null && timelineTool === 'cut') {
+            const playhead = snapToFrameMs(playheadMs)
+            const threshold = Math.max(1, pxToMs(12, pixelsPerSecond))
+            if (Math.abs(next - playhead) <= threshold) next = playhead
+          }
           setHoverFrameMs((current) => (current === next ? current : next))
         }}
         onPointerLeave={() => setHoverFrameMs(null)}
@@ -1498,7 +1706,9 @@ export function TimelinePanel() {
 
           <div
             ref={tracksContentRef}
-            className="relative bg-fb-surface"
+            className={`relative bg-fb-surface ${
+              timelineTool === 'cut' ? 'cursor-crosshair' : ''
+            }`}
           >
             {displayTracks.map((track) => (
               <div
@@ -1511,6 +1721,7 @@ export function TimelinePanel() {
                 }`}
                 style={{ height: TRACK_HEIGHT }}
                 onPointerDown={(event) => {
+                  if (timelineTool === 'cut') return
                   if (event.target !== event.currentTarget) return
                   if (event.button !== 0) return
                   event.preventDefault()
@@ -1592,6 +1803,7 @@ export function TimelinePanel() {
                         }
                         previewTimelineStartMs={placement?.timelineStartMs}
                         isMoving={isMoving}
+                        blade={timelineTool === 'cut'}
                         onSelect={(additive) =>
                           selectClip(clip.id, { additive })
                         }
@@ -1632,6 +1844,11 @@ export function TimelinePanel() {
                             originSourceOutMs: clip.sourceOutMs,
                             linkGroupId: clip.linkGroupId,
                           })
+                        }}
+                        onBlade={(clientX) => {
+                          const cutMs = cutTimeAtClientX(clientX)
+                          if (cutMs == null) return
+                          splitClipsAt([clip.id], cutMs)
                         }}
                       />
                     )
@@ -1692,11 +1909,17 @@ export function TimelinePanel() {
 
           {hoverPlayheadLeft != null && (
             <div
-              className="pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-fb-playhead/35"
+              className={`pointer-events-none absolute top-0 bottom-0 z-30 w-px ${
+                timelineTool === 'cut' ? 'bg-[#ff5c5c]' : 'bg-fb-playhead/35'
+              }`}
               style={{ left: LABEL_WIDTH + hoverPlayheadLeft }}
               aria-hidden
             >
-              <div className="absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-fb-playhead/35" />
+              <div
+                className={`absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full ${
+                  timelineTool === 'cut' ? 'bg-[#ff5c5c]' : 'bg-fb-playhead/35'
+                }`}
+              />
             </div>
           )}
 

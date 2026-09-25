@@ -1,8 +1,6 @@
 import {
   Circle,
   Download,
-  Redo2,
-  Undo2,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useEditorHistory, useEditorStore } from '@/stores/editor-store'
@@ -156,29 +154,6 @@ export function TopToolbar() {
           {projectName}
         </button>
       )}
-
-      <div className="ml-1 flex items-center gap-0.5">
-        <button
-          type="button"
-          onClick={() => undo()}
-          disabled={!canUndo}
-          aria-label="Undo"
-          title="Undo (⌘Z)"
-          className="inline-flex h-7 w-7 items-center justify-center rounded text-white/75 disabled:cursor-not-allowed disabled:opacity-35 hover:enabled:bg-white/[0.06]"
-        >
-          <Undo2 size={15} strokeWidth={1.75} />
-        </button>
-        <button
-          type="button"
-          onClick={() => redo()}
-          disabled={!canRedo}
-          aria-label="Redo"
-          title="Redo (⇧⌘Z)"
-          className="inline-flex h-7 w-7 items-center justify-center rounded text-white/75 disabled:cursor-not-allowed disabled:opacity-35 hover:enabled:bg-white/[0.06]"
-        >
-          <Redo2 size={15} strokeWidth={1.75} />
-        </button>
-      </div>
 
       <div className="flex items-center gap-1.5 text-[12px] text-fb-muted">
         <Circle

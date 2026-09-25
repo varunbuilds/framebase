@@ -11,6 +11,7 @@ import {
   renameProject,
   trimClip,
   unlinkClips,
+  splitClipsAtTime,
   updateClipLabel,
 } from '@/features/editor/operations'
 import { getPlaybackEndMs } from '@/features/editor/playback'
@@ -62,6 +63,7 @@ interface EditorActions {
   ) => boolean
   linkSelectedClips: () => boolean
   unlinkSelectedClips: () => boolean
+  splitClipsAt: (clipIds: string[], timelineCutMs: TimeMs) => boolean
   updateSelectedClipLabel: (label: string) => boolean
 }
 
@@ -448,6 +450,17 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     const clipIds = get().ui.selectedClipIds
     if (clipIds.length === 0) return false
     const result = unlinkClips(get().document, clipIds)
+    if (!result.ok) return false
+    set({
+      document: result.document,
+      ui: { ...get().ui, saveStatus: 'unsaved' },
+    })
+    return true
+  },
+
+  splitClipsAt: (clipIds, timelineCutMs) => {
+    if (clipIds.length === 0) return false
+    const result = splitClipsAtTime(get().document, clipIds, timelineCutMs)
     if (!result.ok) return false
     set({
       document: result.document,
