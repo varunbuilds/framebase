@@ -30,6 +30,7 @@ export type EditorOperation =
       timelineStartMs: TimeMs
     }
   | { type: 'clip.delete'; clipId: string }
+  | { type: 'clips.delete'; clipIds: string[] }
   | { type: 'clip.link'; clipIds: string[]; linkGroupId: string }
   | { type: 'clip.unlink'; clipIds: string[] }
   | {
@@ -67,7 +68,9 @@ export function applyOperation(
     case 'clip.trim':
       return applyClipTrim(document, operation)
     case 'clip.delete':
-      return applyClipDelete(document, operation.clipId)
+      return applyClipDelete(document, [operation.clipId])
+    case 'clips.delete':
+      return applyClipDelete(document, operation.clipIds)
     case 'clip.link':
       return applyClipLink(document, operation.clipIds, operation.linkGroupId)
     case 'clip.unlink':
@@ -254,18 +257,21 @@ function applyClipTrim(
 
 function applyClipDelete(
   document: ProjectDocument,
-  clipId: string,
+  clipIds: string[],
 ): ApplyResult {
-  const clip = getClipById(document, clipId)
-  if (!clip) return { ok: false, error: 'Clip not found.' }
-
-  const removeIds = new Set(
-    clip.linkGroupId
-      ? document.clips
-          .filter((item) => item.linkGroupId === clip.linkGroupId)
-          .map((item) => item.id)
-      : [clipId],
-  )
+  const removeIds = new Set<string>()
+  for (const clipId of clipIds) {
+    const clip = getClipById(document, clipId)
+    if (!clip || removeIds.has(clip.id)) continue
+    if (clip.linkGroupId) {
+      for (const item of document.clips) {
+        if (item.linkGroupId === clip.linkGroupId) removeIds.add(item.id)
+      }
+    } else {
+      removeIds.add(clip.id)
+    }
+  }
+  if (removeIds.size === 0) return { ok: false, error: 'Clip not found.' }
   return {
     ok: true,
     document: withClips(

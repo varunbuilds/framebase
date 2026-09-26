@@ -4,6 +4,10 @@ import {
   Download,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import {
+  isProjectSaveShortcut,
+  projectSaveShortcutLabel,
+} from '@/features/editor/shortcuts'
 import { useEditorHistory, useEditorStore } from '@/stores/editor-store'
 import { stepPlayheadMs } from '@/utils/time'
 
@@ -37,6 +41,18 @@ export function TopToolbar() {
         (target.tagName === 'INPUT' ||
           target.tagName === 'TEXTAREA' ||
           target.isContentEditable)
+
+      if (isProjectSaveShortcut(event) && !event.repeat) {
+        event.preventDefault()
+        event.stopPropagation()
+        if (editingName) {
+          const next = draftName.trim()
+          if (next) setProjectName(next)
+          setEditingName(false)
+        }
+        requestSave()
+        return
+      }
 
       if (
         (event.code === 'Space' || event.key === ' ') &&
@@ -83,14 +99,22 @@ export function TopToolbar() {
         event.preventDefault()
         if (canRedo) redo()
       }
-      if (event.key.toLowerCase() === 's') {
-        event.preventDefault()
-        requestSave()
-      }
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [canUndo, canRedo, undo, redo, requestSave, togglePlayback, seekTo, pause])
+  }, [
+    canUndo,
+    canRedo,
+    draftName,
+    editingName,
+    pause,
+    redo,
+    requestSave,
+    seekTo,
+    setProjectName,
+    togglePlayback,
+    undo,
+  ])
 
   const beginEditingName = () => {
     setDraftName(projectName)
@@ -186,6 +210,7 @@ export function TopToolbar() {
         <button
           type="button"
           onClick={() => requestSave()}
+          title={`Save (${projectSaveShortcutLabel()})`}
           className="h-7 rounded-md border border-fb-border bg-white/[0.06] px-2.5 text-[12px] font-medium text-fb-text hover:bg-white/[0.1]"
         >
           Save

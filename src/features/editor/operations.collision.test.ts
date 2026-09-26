@@ -253,4 +253,30 @@ describe('moveClipOnTimeline collision lanes', () => {
     expect(m2AudioHome.trackId).toBe(audioTracks[0]!.id)
     expect(m2VideoHome.timelineStartMs).toBe(2000)
   })
+
+  it('moves every selected clip by the same delta, including linked partners', () => {
+    let document = placeTwoAvClips()
+    const videos = document.clips.filter(
+      (clip) =>
+        document.tracks.find((track) => track.id === clip.trackId)?.kind ===
+        'video',
+    )
+    const first = videos.find((clip) => clip.timelineStartMs === 0)!
+    const second = videos.find((clip) => clip.timelineStartMs === 2000)!
+
+    const moved = moveClipOnTimeline({
+      document,
+      clipId: first.id,
+      timelineStartMs: 400,
+      alsoClipIds: [first.id, second.id],
+    })
+    expect(moved.ok).toBe(true)
+    if (!moved.ok) return
+    document = moved.document
+
+    const shifted = document.clips
+      .map((clip) => clip.timelineStartMs)
+      .sort((a, b) => a - b)
+    expect(shifted).toEqual([400, 400, 2400, 2400])
+  })
 })

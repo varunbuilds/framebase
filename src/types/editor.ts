@@ -33,6 +33,8 @@ export interface ClipDragState {
   originSourceInMs: TimeMs
   originSourceOutMs: TimeMs
   linkGroupId?: string
+  /** Clips that share this drag, including linked partners of the selection. */
+  movingClipIds?: string[]
 }
 
 export type EditorDocumentSlice = {

@@ -5,6 +5,7 @@ import {
   canLinkClipSelection,
   canUnlinkClipSelection,
   deleteClip,
+  deleteClips,
   linkClips,
   planMediaDrop,
   splitClipAtTime,
@@ -12,6 +13,7 @@ import {
   unlinkClips,
 } from '@/features/editor/operations'
 import { createEmptyProject, getTrackContentEndMs } from '@/features/editor/project'
+import { useEditorStore } from '@/stores/editor-store'
 import type { MediaSource } from '@/types/timeline'
 
 function avSource(id: string, name: string, durationMs: number): MediaSource {
@@ -312,5 +314,66 @@ describe('deleteClip', () => {
     if (!deleted.ok) return
     expect(deleted.document.clips).toHaveLength(1)
     expect(deleted.document.clips[0]?.id).toBe(document.clips[1]!.id)
+  })
+
+  it('removes every selected clip in one document change', () => {
+    let document = createEmptyProject('Test')
+    for (const source of [
+      avSource('m1', 'one.mp4', 1000),
+      avSource('m2', 'two.mp4', 1000),
+    ]) {
+      const added = addMediaSource(document, source)
+      expect(added.ok).toBe(true)
+      if (!added.ok) return
+      document = added.document
+      const placed = addMediaToTimeline({ document, mediaSourceId: source.id })
+      expect(placed.ok).toBe(true)
+      if (!placed.ok) return
+      document = placed.document
+    }
+    const videos = document.clips.filter((clip) => {
+      const track = document.tracks.find((item) => item.id === clip.trackId)
+      return track?.kind === 'video'
+    })
+    expect(videos).toHaveLength(2)
+
+    const deleted = deleteClips(
+      document,
+      videos.map((clip) => clip.id),
+    )
+    expect(deleted.ok).toBe(true)
+    if (!deleted.ok) return
+    expect(deleted.document.clips).toEqual([])
+  })
+
+  it('restores every clip from that delete with one undo', () => {
+    let document = createEmptyProject('Test')
+    for (const source of [
+      avSource('m1', 'one.mp4', 1000),
+      avSource('m2', 'two.mp4', 1000),
+    ]) {
+      const added = addMediaSource(document, source)
+      expect(added.ok).toBe(true)
+      if (!added.ok) return
+      document = added.document
+      const placed = addMediaToTimeline({ document, mediaSourceId: source.id })
+      expect(placed.ok).toBe(true)
+      if (!placed.ok) return
+      document = placed.document
+    }
+
+    useEditorStore.getState().loadDocument(document, null)
+    const ids = document.clips.map((clip) => clip.id)
+    expect(useEditorStore.getState().removeClips(ids)).toBe(true)
+    expect(useEditorStore.getState().document.clips).toEqual([])
+    expect(useEditorStore.temporal.getState().pastStates).toHaveLength(1)
+
+    useEditorStore.temporal.getState().undo()
+    expect(
+      useEditorStore
+        .getState()
+        .document.clips.map((clip) => clip.id)
+        .sort(),
+    ).toEqual([...ids].sort())
   })
 })

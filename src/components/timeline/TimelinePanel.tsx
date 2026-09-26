@@ -20,6 +20,7 @@ import {
 } from '@/features/editor/operations'
 import { resolvePlaybackAt } from '@/features/editor/playback'
 import {
+  getLinkedClips,
   getMediaSourceById,
   getSortedTracks,
   getTimelineDurationMs,
@@ -61,6 +62,34 @@ function getTimelineHeightMax(): number {
     TIMELINE_MIN_HEIGHT,
     Math.min(TIMELINE_MAX_HEIGHT, viewportMax),
   )
+}
+
+const MARQUEE_SLOP_PX = 4
+
+function rectsIntersect(
+  item: DOMRect,
+  marquee: { left: number; top: number; right: number; bottom: number },
+): boolean {
+  return (
+    item.left < marquee.right &&
+    item.right > marquee.left &&
+    item.top < marquee.bottom &&
+    item.bottom > marquee.top
+  )
+}
+
+function clipIdsInsideMarquee(
+  root: HTMLElement,
+  marquee: { left: number; top: number; right: number; bottom: number },
+  order: string[],
+): string[] {
+  const hits = new Set<string>()
+  for (const node of root.querySelectorAll<HTMLElement>('[data-timeline-clip]')) {
+    const id = node.dataset.timelineClip
+    if (!id) continue
+    if (rectsIntersect(node.getBoundingClientRect(), marquee)) hits.add(id)
+  }
+  return order.filter((id) => hits.has(id))
 }
 
 function clampTimelineHeight(height: number): number {
@@ -332,7 +361,9 @@ function TimelineClipBlock({
     (drag.clipId === clip.id ||
       (Boolean(drag.linkGroupId) && clip.linkGroupId === drag.linkGroupId))
 
-  if (isDragParticipant && drag) {
+  if (isMoving && previewTimelineStartMs != null) {
+    timelineStartMs = previewTimelineStartMs
+  } else if (isDragParticipant && drag) {
     if (drag.mode === 'move' && previewTimelineStartMs != null) {
       timelineStartMs = previewTimelineStartMs
     } else if (drag.mode === 'move') {
@@ -382,6 +413,7 @@ function TimelineClipBlock({
     <div
       role="button"
       tabIndex={0}
+      data-timeline-clip={clip.id}
       aria-label={`${title} on ${track.name}`}
       aria-pressed={selected}
       onKeyDown={(event) => {
@@ -609,7 +641,7 @@ export function TimelinePanel() {
   const setClipDrag = useEditorStore((state) => state.setClipDrag)
   const moveClipTo = useEditorStore((state) => state.moveClipTo)
   const trimClipTo = useEditorStore((state) => state.trimClipTo)
-  const removeClip = useEditorStore((state) => state.removeClip)
+  const removeClips = useEditorStore((state) => state.removeClips)
   const linkSelectedClips = useEditorStore((state) => state.linkSelectedClips)
   const unlinkSelectedClips = useEditorStore(
     (state) => state.unlinkSelectedClips,
@@ -630,6 +662,21 @@ export function TimelinePanel() {
   const clipDragPointerRef = useRef<{ x: number; y: number } | null>(null)
   const dragPreferredTrackIdRef = useRef<string | undefined>(undefined)
   const isScrubbingRef = useRef(false)
+  const suppressClipSelectRef = useRef(false)
+  const marqueeRef = useRef<{
+    pointerId: number
+    originX: number
+    originY: number
+    additive: boolean
+    base: string[]
+    moved: boolean
+  } | null>(null)
+  const [marqueeBox, setMarqueeBox] = useState<{
+    left: number
+    top: number
+    width: number
+    height: number
+  } | null>(null)
   const panRef = useRef<{
     originClientX: number
     originClientY: number
@@ -702,6 +749,7 @@ export function TimelinePanel() {
         clipDrag.originTimelineStartMs + dragDeltaMs,
       ),
       trackId: dragPreferredTrackId,
+      alsoClipIds: clipDrag.movingClipIds,
       seedTracks: movePlanSeedRef.current,
     })
     if ('error' in plan) return null
@@ -855,6 +903,12 @@ export function TimelinePanel() {
       if (typing) return
 
       const meta = event.metaKey || event.ctrlKey
+      if (meta && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'a') {
+        event.preventDefault()
+        const clips = useEditorStore.getState().document.clips
+        useEditorStore.getState().selectClips(clips.map((clip) => clip.id))
+        return
+      }
       if (meta && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         splitAtPlayhead()
@@ -1183,10 +1237,12 @@ export function TimelinePanel() {
     }
 
     if (drag.mode === 'move') {
+      if (deltaMs !== 0) suppressClipSelectRef.current = true
       moveClipTo(
         drag.clipId,
         Math.max(0, drag.originTimelineStartMs + deltaMs),
         preferredTrackId,
+        drag.movingClipIds,
       )
     } else if (drag.mode === 'trim-in') {
       const nextIn = clamp(
@@ -1243,11 +1299,8 @@ export function TimelinePanel() {
       const underMs = clamp(pxToMs(Math.max(0, x), pixelsPerSecond), 0, maxMs)
       const rawStart = underMs - dragGrabOffsetMsRef.current
       const doc = useEditorStore.getState().document
-      const moving = doc.clips.filter(
-        (clip) =>
-          clip.id === drag.clipId ||
-          (Boolean(drag.linkGroupId) && clip.linkGroupId === drag.linkGroupId),
-      )
+      const movingIds = new Set(drag.movingClipIds ?? [drag.clipId])
+      const moving = doc.clips.filter((clip) => movingIds.has(clip.id))
       const primary = moving.find((clip) => clip.id === drag.clipId)
       const durationMs = primary
         ? primary.sourceOutMs - primary.sourceInMs
@@ -1374,6 +1427,49 @@ export function TimelinePanel() {
         return
       }
 
+      const marquee = marqueeRef.current
+      if (marquee && event.pointerId === marquee.pointerId) {
+        const dx = event.clientX - marquee.originX
+        const dy = event.clientY - marquee.originY
+        if (!marquee.moved && Math.hypot(dx, dy) < MARQUEE_SLOP_PX) return
+        marquee.moved = true
+        setHoverFrameMs(null)
+        const bounds = {
+          left: Math.min(marquee.originX, event.clientX),
+          top: Math.min(marquee.originY, event.clientY),
+          right: Math.max(marquee.originX, event.clientX),
+          bottom: Math.max(marquee.originY, event.clientY),
+        }
+        setMarqueeBox({
+          left: bounds.left,
+          top: bounds.top,
+          width: bounds.right - bounds.left,
+          height: bounds.bottom - bounds.top,
+        })
+        const root = tracksContentRef.current
+        if (!root) return
+        const hits = clipIdsInsideMarquee(
+          root,
+          bounds,
+          useEditorStore.getState().document.clips.map((clip) => clip.id),
+        )
+        const next = marquee.additive
+          ? [
+              ...marquee.base,
+              ...hits.filter((id) => !marquee.base.includes(id)),
+            ]
+          : hits
+        const current = useEditorStore.getState().ui.selectedClipIds
+        if (
+          current.length === next.length &&
+          current.every((id, index) => id === next[index])
+        ) {
+          return
+        }
+        useEditorStore.getState().selectClips(next)
+        return
+      }
+
       const pan = panRef.current
       const body = bodyScrollRef.current
       if (!pan || !body) return
@@ -1394,9 +1490,18 @@ export function TimelinePanel() {
       setTimelineScrollLeft(body.scrollLeft)
     }
 
-    const onUp = () => {
+    const onUp = (event: PointerEvent) => {
       if (isScrubbingRef.current) {
         isScrubbingRef.current = false
+        return
+      }
+
+      const marquee = marqueeRef.current
+      if (marquee && event.pointerId === marquee.pointerId) {
+        if (marquee.moved) suppressClickRef.current = true
+        else seekFromClientX(marquee.originX)
+        marqueeRef.current = null
+        setMarqueeBox(null)
         return
       }
 
@@ -1462,14 +1567,12 @@ export function TimelinePanel() {
       }
       if (selectedClipIds.length > 0) {
         event.preventDefault()
-        for (const clipId of selectedClipIds) {
-          removeClip(clipId)
-        }
+        removeClips(selectedClipIds)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [removeClip, selectedClipIds])
+  }, [removeClips, selectedClipIds])
 
   const hoverPlayheadLeft =
     hoverFrameMs == null
@@ -1517,6 +1620,17 @@ export function TimelinePanel() {
       className="relative flex w-full min-w-0 shrink-0 select-none flex-col overflow-hidden border-t border-fb-border bg-fb-surface"
       style={{ height: clampTimelineHeight(timelineHeightPx) }}
     >
+      {marqueeBox && (
+        <div
+          className="pointer-events-none fixed z-50 border border-fb-accent/80 bg-fb-accent/15"
+          style={{
+            left: marqueeBox.left,
+            top: marqueeBox.top,
+            width: marqueeBox.width,
+            height: marqueeBox.height,
+          }}
+        />
+      )}
       <div
         role="separator"
         aria-orientation="horizontal"
@@ -1664,7 +1778,13 @@ export function TimelinePanel() {
           selectClip(null)
         }}
         onPointerMove={(event) => {
-          if (isHandDragging || isClipMoving || clipDrag || isScrubbingRef.current) {
+          if (
+            isHandDragging ||
+            isClipMoving ||
+            clipDrag ||
+            isScrubbingRef.current ||
+            marqueeRef.current?.moved
+          ) {
             setHoverFrameMs(null)
             return
           }
@@ -1771,14 +1891,16 @@ export function TimelinePanel() {
                   if (event.target !== event.currentTarget) return
                   if (event.button !== 0) return
                   event.preventDefault()
-                  const viewport = bodyScrollRef.current
-                  if (!viewport) return
-                  panRef.current = {
-                    originClientX: event.clientX,
-                    originClientY: event.clientY,
-                    originScrollLeft: viewport.scrollLeft,
-                    originScrollTop: viewport.scrollTop,
-                    seekClientX: event.clientX,
+                  const additive =
+                    event.metaKey || event.ctrlKey || event.shiftKey
+                  marqueeRef.current = {
+                    pointerId: event.pointerId,
+                    originX: event.clientX,
+                    originY: event.clientY,
+                    additive,
+                    base: additive
+                      ? [...useEditorStore.getState().ui.selectedClipIds]
+                      : [],
                     moved: false,
                   }
                 }}
@@ -1823,7 +1945,8 @@ export function TimelinePanel() {
                     const isMoving = Boolean(
                       clipDrag &&
                         clipDrag.mode === 'move' &&
-                        (clipDrag.clipId === clip.id ||
+                        (clipDrag.movingClipIds?.includes(clip.id) ||
+                          clipDrag.clipId === clip.id ||
                           (Boolean(clipDrag.linkGroupId) &&
                             clip.linkGroupId === clipDrag.linkGroupId)),
                     )
@@ -1839,20 +1962,17 @@ export function TimelinePanel() {
                           clip.linkGroupId != null &&
                           selectedLinkGroupIds.has(clip.linkGroupId)
                         }
-                        dragDeltaMs={
-                          clipDrag &&
-                          (clipDrag.clipId === clip.id ||
-                            (Boolean(clipDrag.linkGroupId) &&
-                              clip.linkGroupId === clipDrag.linkGroupId))
-                            ? dragDeltaMs
-                            : 0
-                        }
+                        dragDeltaMs={isMoving ? dragDeltaMs : 0}
                         previewTimelineStartMs={placement?.timelineStartMs}
                         isMoving={isMoving}
                         blade={timelineTool === 'cut'}
-                        onSelect={(additive) =>
+                        onSelect={(additive) => {
+                          if (suppressClipSelectRef.current) {
+                            suppressClipSelectRef.current = false
+                            return
+                          }
                           selectClip(clip.id, { additive })
-                        }
+                        }}
                         onPointerDownMove={(clientX, clientY) => {
                           const underMs = frameAtClientX(clientX)
                           dragGrabOffsetMsRef.current =
@@ -1863,6 +1983,21 @@ export function TimelinePanel() {
                           setDragDeltaMs(0)
                           setDragPreferredTrackId(track.id)
                           setHoverFrameMs(null)
+                          const state = useEditorStore.getState()
+                          const selected = new Set(state.ui.selectedClipIds)
+                          const linkedIds = getLinkedClips(state.document, clip.id).map(
+                            (item) => item.id,
+                          )
+                          const inSelection = linkedIds.some((id) => selected.has(id))
+                          const seeds = inSelection
+                            ? [...selected, clip.id]
+                            : [clip.id]
+                          const movingClipIds = new Set<string>()
+                          for (const id of seeds) {
+                            for (const member of getLinkedClips(state.document, id)) {
+                              movingClipIds.add(member.id)
+                            }
+                          }
                           setClipDrag({
                             clipId: clip.id,
                             mode: 'move',
@@ -1873,6 +2008,7 @@ export function TimelinePanel() {
                             originSourceInMs: clip.sourceInMs,
                             originSourceOutMs: clip.sourceOutMs,
                             linkGroupId: clip.linkGroupId,
+                            movingClipIds: [...movingClipIds],
                           })
                         }}
                         onPointerDownTrim={(edge, clientX) => {

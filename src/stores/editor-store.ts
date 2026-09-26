@@ -4,7 +4,7 @@ import { temporal } from 'zundo'
 import {
   addMediaSource,
   addMediaToTimeline,
-  deleteClip,
+  deleteClips,
   linkClips,
   moveClipOnTimeline,
   removeMediaSource,
@@ -49,6 +49,7 @@ interface EditorActions {
     clipId: string | null,
     options?: { additive?: boolean },
   ) => void
+  selectClips: (clipIds: string[]) => void
   selectMediaSource: (mediaSourceIds: string[]) => void
   setPlayheadMs: (ms: TimeMs) => void
   seekTo: (ms: TimeMs) => void
@@ -68,10 +69,12 @@ interface EditorActions {
   unregisterMediaSource: (mediaSourceId: string) => boolean
   addClip: (mediaSourceId: string, timelineStartMs?: TimeMs, trackId?: string) => boolean
   removeClip: (clipId: string) => boolean
+  removeClips: (clipIds: string[]) => boolean
   moveClipTo: (
     clipId: string,
     timelineStartMs: TimeMs,
     trackId?: string,
+    alsoClipIds?: string[],
   ) => boolean
   trimClipTo: (
     clipId: string,
@@ -208,6 +211,12 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
 
     set({
       ui: { ...get().ui, selectedClipIds: [clipId] },
+    })
+  },
+
+  selectClips: (clipIds) => {
+    set({
+      ui: { ...get().ui, selectedClipIds: clipIds },
     })
   },
 
@@ -446,8 +455,10 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     return true
   },
 
-  removeClip: (clipId) => {
-    const result = deleteClip(get().document, clipId)
+  removeClip: (clipId) => get().removeClips([clipId]),
+
+  removeClips: (clipIds) => {
+    const result = deleteClips(get().document, clipIds)
     if (!result.ok) return false
     const ui = get().ui
     set({
@@ -464,12 +475,13 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     return true
   },
 
-  moveClipTo: (clipId, timelineStartMs, trackId) => {
+  moveClipTo: (clipId, timelineStartMs, trackId, alsoClipIds) => {
     const result = moveClipOnTimeline({
       document: get().document,
       clipId,
       timelineStartMs,
       trackId,
+      alsoClipIds,
     })
     if (!result.ok) return false
     set({

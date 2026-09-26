@@ -434,6 +434,14 @@ export function deleteClip(
   return applyOperation(document, { type: 'clip.delete', clipId })
 }
 
+/** One document change, so undo restores every removed clip together. */
+export function deleteClips(
+  document: ProjectDocument,
+  clipIds: string[],
+): OperationResult {
+  return applyOperation(document, { type: 'clips.delete', clipIds })
+}
+
 export function createTrack(args: {
   document: ProjectDocument
   kind: Track['kind']
@@ -582,7 +590,8 @@ export type ClipMovePlan = {
 }
 
 /**
- * Preview/commit plan for moving a clip (and linked partners) with no overlaps.
+ * Preview/commit plan for moving a clip, its linked partners, and any other
+ * selected clips by the same timeline delta.
  * Video collision → free / new lane above; audio → free / new lane below.
  * When a home lane is free again, placements fold back to Video 1 / Audio 1.
  */
@@ -592,6 +601,8 @@ export function planClipMove(args: {
   timelineStartMs: TimeMs
   /** Preferred lane for the primary clip (vertical drop target). */
   trackId?: string
+  /** Other selected clips that should keep their offset from the primary. */
+  alsoClipIds?: string[]
   /** Reuse provisional tracks from a prior live-drag plan (stable ids). */
   seedTracks?: Track[]
 }): ClipMovePlan | { error: string } {
@@ -600,20 +611,31 @@ export function planClipMove(args: {
     return { error: 'Clip not found.' }
   }
 
-  const linked = getLinkedClips(args.document, args.clipId)
-  // Linked AV partners always move together in time; trackId is only a
-  // preferred drop lane for the primary clip.
-  const movingLinkedGroup = linked.length > 1
-  const targets = (movingLinkedGroup ? linked : [clip])
-    .slice()
-    .sort((a, b) => {
-      const aKind = getTrackById(args.document, a.trackId)?.kind
-      const bKind = getTrackById(args.document, b.trackId)?.kind
-      if (aKind === bKind) return 0
-      if (aKind === 'video') return -1
-      if (bKind === 'video') return 1
-      return 0
-    })
+  const seeds = new Set<string>([args.clipId])
+  for (const id of args.alsoClipIds ?? []) seeds.add(id)
+  const targets: Clip[] = []
+  const seen = new Set<string>()
+  for (const id of seeds) {
+    for (const member of getLinkedClips(args.document, id)) {
+      if (seen.has(member.id)) continue
+      seen.add(member.id)
+      targets.push(member)
+    }
+  }
+  if (!seen.has(clip.id)) targets.unshift(clip)
+
+  // Grabbed clip is placed first so its drop lane is claimed. Linked partners
+  // and the rest of the selection keep their own lanes and the same time delta.
+  targets.sort((a, b) => {
+    if (a.id === args.clipId) return -1
+    if (b.id === args.clipId) return 1
+    const aKind = getTrackById(args.document, a.trackId)?.kind
+    const bKind = getTrackById(args.document, b.trackId)?.kind
+    if (aKind === bKind) return a.timelineStartMs - b.timelineStartMs
+    if (aKind === 'video') return -1
+    if (bKind === 'video') return 1
+    return 0
+  })
 
   const movingIds = new Set(targets.map((item) => item.id))
   const deltaMs = Math.round(args.timelineStartMs) - clip.timelineStartMs
@@ -807,6 +829,7 @@ export function moveClipOnTimeline(args: {
   clipId: string
   timelineStartMs: TimeMs
   trackId?: string
+  alsoClipIds?: string[]
 }): OperationResult {
   const plan = planClipMove(args)
   if ('error' in plan) {
