@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import editorPageSource from '../../pages/EditorPage.tsx?raw'
+import projectRoomSource from '../../features/collab/ProjectRoom.tsx?raw'
 import {
   autosaveEnabled,
   editorShellMounts,
@@ -27,6 +28,10 @@ describe('editor loading session', () => {
     expect(editorPageSource).toContain('<EditorShell />')
     expect(editorPageSource).not.toContain('OpeningProject')
     expect(editorPageSource).toContain('autosaveEnabled')
+    expect(editorPageSource).toContain('ProjectRoom')
+    expect(editorPageSource).toContain('collabReady')
+    expect(projectRoomSource).toContain('authEndpoint={requestProjectRoomToken}')
+    expect(projectRoomSource).not.toContain('publicApiKey')
   })
 
   it('shows project structure while media is still syncing', () => {

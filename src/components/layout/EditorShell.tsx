@@ -3,6 +3,7 @@ import { TopToolbar } from '@/components/layout/TopToolbar'
 import { MediaPanel } from '@/components/media/MediaPanel'
 import { PreviewPanel } from '@/components/preview/PreviewPanel'
 import { TimelinePanel } from '@/components/timeline/TimelinePanel'
+import { CollabConnectionBanner } from '@/features/collab/CollabConnectionBanner'
 import { useWorkspace } from '@/lib/workspace/use-workspace'
 import { chooseWorkspace, reconnectWorkspace } from '@/lib/workspace/workspace-manager'
 import {
@@ -67,6 +68,7 @@ export function EditorShell() {
   return (
     <div className="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-fb-app text-fb-text">
       <TopToolbar />
+      <CollabConnectionBanner />
       <WorkspaceConnectionBanner />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">

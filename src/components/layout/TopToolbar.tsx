@@ -6,6 +6,8 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { ShareProjectDialog } from '@/components/projects/ShareProjectDialog'
 import { ToolbarNameSkeleton } from '@/components/layout/EditorSkeletons'
+import { collabIndicator } from '@/features/collab/collab-session'
+import { useCollabSession } from '@/features/collab/collab-session-context'
 import { useEditorSession } from '@/features/editor/editor-session-context'
 import { useAuth } from '@/features/auth/use-auth'
 import { projectAccessRole } from '@/features/projects/share-access'
@@ -37,6 +39,7 @@ export function TopToolbar() {
   const [shareOpen, setShareOpen] = useState(false)
   const canShare = projectAccessRole(project.ownerId, user?.id) === 'owner'
   const session = useEditorSession()
+  const collab = useCollabSession()
 
   useEffect(() => {
     if (editingName) {
@@ -247,6 +250,8 @@ export function TopToolbar() {
         </span>
       </div>
 
+      {collab ? <CollabStatus /> : null}
+
       <div className="ml-auto flex items-center gap-2">
         <button
           type="button"
@@ -283,5 +288,32 @@ export function TopToolbar() {
         <ShareProjectDialog projectId={project.id} onClose={() => setShareOpen(false)} />
       )}
     </header>
+  )
+}
+
+const collabToneClass: Record<string, string> = {
+  live: 'fill-emerald-500 text-emerald-500',
+  pending: 'fill-fb-accent text-fb-accent',
+  warn: 'fill-amber-500 text-amber-500',
+  error: 'fill-fb-danger text-fb-danger',
+}
+
+/** Room connection state. Distinct from the Supabase save status beside it. */
+function CollabStatus() {
+  const collab = useCollabSession()
+  if (!collab) return null
+  const indicator = collabIndicator(collab)
+  return (
+    <div
+      className="flex items-center gap-1.5 border-l border-fb-border pl-3 text-[12px] text-fb-muted"
+      title="Collaborative connection"
+    >
+      <Circle
+        size={8}
+        className={collabToneClass[indicator.tone] ?? collabToneClass.pending}
+        aria-hidden
+      />
+      <span>{indicator.short}</span>
+    </div>
   )
 }

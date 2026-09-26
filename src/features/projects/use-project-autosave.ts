@@ -9,6 +9,15 @@ import { createSaveQueue } from './save-queue'
 const SAVE_DELAY_MS = 800
 
 /**
+ * Mirrors the collaborative document into projects.document.
+ *
+ * Liveblocks Storage is the authoritative collaborative document. This write is
+ * one-way and derived: nothing reads projects.document back into a live room,
+ * so there is no Liveblocks → Supabase → Liveblocks loop. The mirror still
+ * matters because Supabase Storage media access (can_access_project_media) and
+ * media reference counting both read this JSON, and because it seeds a room's
+ * storage the first time a project is opened.
+ *
  * Persists ProjectDocument only. Playback, selection, object URLs, filmstrips,
  * and waveforms never enter the saved JSON. Saves run one at a time.
  */

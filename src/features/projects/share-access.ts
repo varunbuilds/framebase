@@ -1,4 +1,5 @@
 import { isProjectId } from '@/features/projects/document'
+import { projectRoomId } from '../../../supabase/functions/_shared/project-room.ts'
 
 const SHARE_TOKEN = /^[0-9a-f]{64}$/
 
@@ -13,12 +14,12 @@ export function shareJoinPath(token: string): string {
 }
 
 /**
- * Future Liveblocks room. An auth endpoint must confirm project membership
- * before issuing access. The room does not carry source media or caches.
+ * The Liveblocks room for a project. The auth endpoint confirms project
+ * membership before issuing access, and the room carries no source media or
+ * caches — only the collaborative editor document.
  */
 export function projectCollaborationRoomId(projectId: string): string {
-  if (!isProjectId(projectId)) throw new Error('Invalid project id')
-  return projectId
+  return projectRoomId(projectId)
 }
 
 export function canDeleteProject(role: 'owner' | 'editor'): boolean {

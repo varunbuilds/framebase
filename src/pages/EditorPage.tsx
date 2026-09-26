@@ -1,6 +1,9 @@
 import { getRouteApi, Link } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { EditorShell } from '@/components/layout/EditorShell'
+import { ProjectRoom } from '@/features/collab/ProjectRoom'
+import { useCollabSession } from '@/features/collab/collab-session-context'
+import { collabIndicator } from '@/features/collab/collab-session'
 import { EditorSessionProvider } from '@/features/editor/editor-session-context'
 import {
   autosaveEnabled,
@@ -24,12 +27,32 @@ import { useProjectAutosave } from '@/features/projects/use-project-autosave'
 import { useEditorStore } from '@/stores/editor-store'
 const editorRoute = getRouteApi('/authenticated/editor/$projectId')
 
+/**
+ * Auth and project authorization already happened in the route. The editor then
+ * joins `framebase:<projectId>`, and the collaborative document replaces the
+ * stored Supabase snapshot as the document the editor edits. The snapshot is
+ * still what seeds a brand new room.
+ */
 export function EditorPage() {
   const project = editorRoute.useLoaderData()
-  const loadDocument = useEditorStore((state) => state.loadDocument)
+  return (
+    <ProjectRoom
+      projectId={project.id}
+      initialDocument={project.document}
+      savedAt={project.updatedAt}
+    >
+      <EditorProjectSession />
+    </ProjectRoom>
+  )
+}
+
+function EditorProjectSession() {
+  const project = editorRoute.useLoaderData()
   const workspace = useWorkspace()
-  const { id: projectId, document: storedDocument, updatedAt } = project
-  const openKey = `${projectId}:${updatedAt}`
+  const collab = useCollabSession()
+  const { id: projectId } = project
+  const collabReady = collab?.phase === 'ready'
+  const openKey = projectId
   const [openedKey, setOpenedKey] = useState<string | null>(null)
   const [structureKey, setStructureKey] = useState<string | null>(null)
   const [phase, setPhase] = useState<EditorSessionPhase>('opening')
@@ -39,6 +62,10 @@ export function EditorPage() {
   useEffect(() => {
     let active = true
     if (workspace.status !== 'ready') return
+    // The room owns the document, so the open sequence waits for its storage.
+    if (!collabReady) return
+    const collabDocument = useEditorStore.getState().document
+    if (collabDocument.id !== projectId) return
     const alreadyOpen = openedRef.current === openKey
     void (async () => {
       await Promise.resolve()
@@ -46,15 +73,14 @@ export function EditorPage() {
       if (!alreadyOpen) {
         setPhase('opening')
         setStatusLabel('Opening project…')
-        const mediaIds = new Set(storedDocument.mediaSources.map((source) => source.id))
+        const mediaIds = new Set(collabDocument.mediaSources.map((source) => source.id))
         revokeObjectUrlsExcept(mediaIds)
         retainRuntimeDerivedCaches(mediaIds)
-        loadDocument(storedDocument, updatedAt)
         setStructureKey(openKey)
         setPhase('syncing')
       }
       const report = await syncProjectMediaOnce({
-        document: storedDocument,
+        document: collabDocument,
         workspaceReady: true,
         hasLocal: (mediaSourceId) => hasMedia(mediaSourceId),
         download: async (source) => {
@@ -87,8 +113,8 @@ export function EditorPage() {
       if (!alreadyOpen) setPhase('hydrating')
       const committed = await commitPreparedProject({
         isActive: () => active,
-        document: storedDocument,
-        prepare: () => hydrateDocumentMediaOnce(storedDocument).then(() => undefined),
+        document: collabDocument,
+        prepare: () => hydrateDocumentMediaOnce(collabDocument).then(() => undefined),
         commit: () => undefined,
       })
       if (!active || !committed) return
@@ -97,29 +123,35 @@ export function EditorPage() {
       setPhase('ready')
       setStatusLabel(null)
       setOpenedKey(openKey)
-      const storedKeys = storedDocument.mediaSources.flatMap((source) =>
+      const storedKeys = collabDocument.mediaSources.flatMap((source) =>
         source.locator.kind === 'opfs' || source.locator.kind === 'local'
           ? [source.locator.key]
           : [],
       )
       void copyLegacyOpfsMediaIntoWorkspace(storedKeys)
-      void mirrorCurrentProject(storedDocument).catch(() => undefined)
+      void mirrorCurrentProject(collabDocument).catch(() => undefined)
     })()
     return () => {
       active = false
     }
-  }, [loadDocument, openKey, storedDocument, updatedAt, workspace.status])
+  }, [collabReady, openKey, projectId, workspace.status])
 
+  const collabStatus = collab ? collabIndicator(collab) : null
   const displayedPhase: EditorSessionPhase =
     workspace.status === 'restoring'
       ? 'restoring-workspace'
       : workspace.status !== 'ready'
         ? 'needs-workspace'
         : phase
-  const structureReady = structureKey === openKey && workspace.status === 'ready'
-  const interactive = openedKey === openKey
+  const structureReady =
+    structureKey === openKey && workspace.status === 'ready' && collabReady
+  const interactive = openedKey === openKey && collabReady
   const label =
-    displayedPhase === 'restoring-workspace' ? 'Restoring workspace…' : statusLabel
+    displayedPhase === 'restoring-workspace'
+      ? 'Restoring workspace…'
+      : !collabReady
+        ? (collabStatus?.short ?? 'Connecting…')
+        : statusLabel
 
   return (
     <EditorSessionProvider

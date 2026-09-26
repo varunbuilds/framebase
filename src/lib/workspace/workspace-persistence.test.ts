@@ -222,7 +222,7 @@ describe('project sharing access', () => {
     expect(roleAfterShareRedeem('editor')).toBe('editor')
     expect(projectAccessRole(PROJECT_ID, PROJECT_ID)).toBe('owner')
     expect(projectAccessRole(PROJECT_ID, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')).toBe('editor')
-    expect(projectCollaborationRoomId(PROJECT_ID)).toBe(PROJECT_ID)
+    expect(projectCollaborationRoomId(PROJECT_ID)).toBe(`framebase:${PROJECT_ID}`)
   })
 
   it('remembers a share token outside the project document', () => {
