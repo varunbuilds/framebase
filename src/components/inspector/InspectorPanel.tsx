@@ -1,6 +1,8 @@
 import { useMemo, type ReactNode } from 'react'
 import { getMediaSourceById } from '@/features/editor/project'
 import { useEditorStore } from '@/stores/editor-store'
+import { useEditorSession } from '@/features/editor/editor-session-context'
+import { InspectorSkeleton } from '@/components/layout/EditorSkeletons'
 import { formatDurationShort, formatTimecode, msToSeconds } from '@/utils/time'
 
 function Field({
@@ -55,6 +57,7 @@ function NumberField({
 }
 
 export function InspectorPanel() {
+  const session = useEditorSession()
   const document = useEditorStore((state) => state.document)
   const selectedClipId = useEditorStore(
     (state) => state.ui.selectedClipIds[state.ui.selectedClipIds.length - 1] ?? null,
@@ -82,8 +85,13 @@ export function InspectorPanel() {
         </h2>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-none p-3">
-        {!clip || !media ? (
+      <div
+        className={`min-h-0 flex-1 overflow-y-auto overscroll-none ${session.structureReady ? 'p-3' : ''} ${session.interactive ? '' : 'pointer-events-none'}`}
+        aria-busy={!session.structureReady}
+      >
+        {!session.structureReady ? (
+          <InspectorSkeleton />
+        ) : !clip || !media ? (
           <div className="flex h-full items-center justify-center px-2 text-center">
             <p className="text-[12px] leading-relaxed text-fb-muted">
               Select a clip to inspect timeline position, duration, and source

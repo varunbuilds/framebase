@@ -60,7 +60,7 @@ export function describeCloudMedia(input: {
   local: boolean
   remote: boolean
   transfer: CloudTransfer | null
-}): { text: string; action: 'download' | 'upload' | null } {
+}): { text: string; action: 'download' | 'upload' | 'retry' | null } {
   const transfer = input.transfer
   if (transfer?.phase === 'uploading') {
     return { text: progressLabel('↑ Uploading', transfer.progress), action: null }
@@ -70,6 +70,9 @@ export function describeCloudMedia(input: {
   }
   if (input.local && input.remote) return { text: '✓ Synced', action: null }
   if (input.local) return { text: '✓ Local', action: 'upload' }
+  if (input.remote && transfer?.phase === 'error') {
+    return { text: '☁ Available in cloud', action: 'retry' }
+  }
   if (input.remote) return { text: '☁ Available in cloud', action: 'download' }
   return { text: '⚠ Media unavailable', action: null }
 }

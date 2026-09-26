@@ -26,6 +26,8 @@ import {
   getTimelineDurationMs,
 } from '@/features/editor/project'
 import { useEditorHistory, useEditorStore } from '@/stores/editor-store'
+import { useEditorSession } from '@/features/editor/editor-session-context'
+import { TimelineSkeleton } from '@/components/layout/EditorSkeletons'
 import {
   FILMSTRIP_FRAME_HEIGHT,
   FILMSTRIP_JPEG_QUALITY,
@@ -664,6 +666,7 @@ function TimelinePlayhead({
 }
 
 export function TimelinePanel() {
+  const session = useEditorSession()
   const document = useEditorStore((state) => state.document)
   const pixelsPerSecond = useEditorStore((state) => state.ui.pixelsPerSecond)
   const timelineScrollLeft = useEditorStore(
@@ -937,6 +940,7 @@ export function TimelinePanel() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!session.interactive) return
       const target = event.target as HTMLElement | null
       const typing =
         target != null &&
@@ -969,7 +973,7 @@ export function TimelinePanel() {
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [splitAtPlayhead])
+  }, [session.interactive, splitAtPlayhead])
 
   const saveCurrentFrame = useCallback(async () => {
     const state = useEditorStore.getState()
@@ -1599,6 +1603,7 @@ export function TimelinePanel() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!session.interactive) return
       if (event.key !== 'Backspace' && event.key !== 'Delete') return
       const target = event.target as HTMLElement | null
       if (
@@ -1616,7 +1621,7 @@ export function TimelinePanel() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [removeClips, selectedClipIds])
+  }, [removeClips, selectedClipIds, session.interactive])
 
   const hoverPlayheadLeft =
     hoverFrameMs == null
@@ -1659,10 +1664,28 @@ export function TimelinePanel() {
 
   const heightMax = getTimelineHeightMax()
 
+  if (!session.structureReady) {
+    return (
+      <section
+        className="relative flex w-full min-w-0 shrink-0 select-none flex-col overflow-hidden border-t border-fb-border bg-fb-surface pointer-events-none"
+        style={{ height: clampTimelineHeight(timelineHeightPx) }}
+        aria-busy="true"
+      >
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-fb-border bg-fb-panel px-3 pt-1">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
+            Timeline
+          </h2>
+        </div>
+        <TimelineSkeleton />
+      </section>
+    )
+  }
+
   return (
     <section
-      className="relative flex w-full min-w-0 shrink-0 select-none flex-col overflow-hidden border-t border-fb-border bg-fb-surface"
+      className={`relative flex w-full min-w-0 shrink-0 select-none flex-col overflow-hidden border-t border-fb-border bg-fb-surface ${session.interactive ? '' : 'pointer-events-none'}`}
       style={{ height: clampTimelineHeight(timelineHeightPx) }}
+      aria-busy={!session.structureReady}
     >
       {marqueeBox && (
         <div

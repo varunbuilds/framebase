@@ -2,7 +2,10 @@ import { useState } from 'react'
 import { TopToolbar } from '@/components/layout/TopToolbar'
 import { MediaPanel } from '@/components/media/MediaPanel'
 import { PreviewPanel } from '@/components/preview/PreviewPanel'
+import { InspectorPanel } from '@/components/inspector/InspectorPanel'
 import { TimelinePanel } from '@/components/timeline/TimelinePanel'
+import { useWorkspace } from '@/lib/workspace/use-workspace'
+import { chooseWorkspace, reconnectWorkspace } from '@/lib/workspace/workspace-manager'
 import {
   Captions,
   FolderOpen,
@@ -65,6 +68,7 @@ export function EditorShell() {
   return (
     <div className="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-fb-app text-fb-text">
       <TopToolbar />
+      <WorkspaceConnectionBanner />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <nav
@@ -105,10 +109,44 @@ export function EditorShell() {
           </div>
           <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
             <PreviewPanel />
+            <InspectorPanel />
           </div>
         </div>
         <TimelinePanel />
       </div>
+    </div>
+  )
+}
+
+function WorkspaceConnectionBanner() {
+  const workspace = useWorkspace()
+  const [pending, setPending] = useState(false)
+  if (workspace.status === 'ready' || workspace.status === 'restoring') return null
+  const folder = workspace.folderName
+  return (
+    <div className="flex shrink-0 items-center justify-between gap-3 border-b border-fb-border bg-fb-panel px-4 py-2">
+      <p className="text-[12px] text-fb-muted">
+        {workspace.status === 'unsupported'
+          ? 'This browser cannot use a local workspace folder. Open Framebase in Chrome or Arc.'
+          : workspace.status === 'none'
+            ? 'No workspace connected. Select a workspace folder to use local media.'
+            : `Workspace access needs to be restored${folder ? ` for ${folder}` : ''}.`}
+      </p>
+      {workspace.status === 'needs-permission' || workspace.status === 'none' ? (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            setPending(true)
+            const restore =
+              workspace.status === 'needs-permission' ? reconnectWorkspace : chooseWorkspace
+            void restore().finally(() => setPending(false))
+          }}
+          className="h-7 shrink-0 rounded-md bg-white px-2.5 text-[12px] font-medium text-black disabled:opacity-50"
+        >
+          {pending ? 'Opening…' : workspace.status === 'none' ? 'Select workspace' : 'Reconnect'}
+        </button>
+      ) : null}
     </div>
   )
 }

@@ -1,11 +1,13 @@
 import { getRouteApi, Link, useNavigate, useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { NewProjectDialog } from '@/components/projects/NewProjectDialog'
-import { WorkspaceBar } from '@/components/projects/WorkspaceBar'
+import { WorkspaceAccess } from '@/components/projects/WorkspaceAccess'
 import { useAuth } from '@/features/auth/use-auth'
 import { releaseProjectMedia } from '@/lib/media/release-project-media'
 import { deleteProjectCloudMedia } from '@/lib/media/publish-source'
 import { mirrorCurrentProject } from '@/lib/workspace/workspace-manager'
+import { useWorkspace } from '@/lib/workspace/use-workspace'
+import { showsProjectLibrary } from '@/lib/workspace/project-library'
 import {
   createProject,
   deleteProject,
@@ -28,6 +30,8 @@ function formatUpdated(value: string): string {
 
 export function ProjectsPage() {
   const loaded = projectsRoute.useLoaderData()
+  const workspace = useWorkspace()
+  const library = showsProjectLibrary(workspace.status)
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
   const router = useRouter()
@@ -112,6 +116,10 @@ export function ProjectsPage() {
       </header>
 
       <div className="mx-auto flex w-full max-w-[1080px] flex-1 flex-col overflow-auto px-6 py-8">
+        <WorkspaceAccess />
+
+        {library ? (
+          <>
         <div className="mb-8 flex items-end justify-between gap-4">
           <div>
             <h1 className="text-[28px] font-semibold tracking-tight text-fb-text">
@@ -132,8 +140,6 @@ export function ProjectsPage() {
             New Project
           </button>
         </div>
-
-        <WorkspaceBar />
 
         {error && <p className="mb-4 text-[13px] text-fb-danger">{error}</p>}
 
@@ -195,6 +201,8 @@ export function ProjectsPage() {
             ))}
           </ul>
         )}
+          </>
+        ) : null}
       </div>
       {dialogOpen && (
         <NewProjectDialog

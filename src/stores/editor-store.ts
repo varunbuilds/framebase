@@ -321,11 +321,14 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
   },
 
   setPlaybackError: (error) => {
+    const ui = get().ui
+    const isPlaying = error ? false : ui.isPlaying
+    if (ui.playbackError === error && ui.isPlaying === isPlaying) return
     set({
       ui: {
-        ...get().ui,
+        ...ui,
         playbackError: error,
-        isPlaying: error ? false : get().ui.isPlaying,
+        isPlaying,
       },
     })
   },

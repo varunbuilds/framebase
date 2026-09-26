@@ -5,6 +5,8 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { ShareProjectDialog } from '@/components/projects/ShareProjectDialog'
+import { ToolbarNameSkeleton } from '@/components/layout/EditorSkeletons'
+import { useEditorSession } from '@/features/editor/editor-session-context'
 import { useAuth } from '@/features/auth/use-auth'
 import { projectAccessRole } from '@/features/projects/share-access'
 import {
@@ -34,6 +36,7 @@ export function TopToolbar() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [shareOpen, setShareOpen] = useState(false)
   const canShare = projectAccessRole(project.ownerId, user?.id) === 'owner'
+  const session = useEditorSession()
 
   useEffect(() => {
     if (editingName) {
@@ -44,6 +47,20 @@ export function TopToolbar() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!session.interactive) {
+        if (
+          isProjectSaveShortcut(event) ||
+          event.code === 'Space' ||
+          event.key === ' ' ||
+          event.key === 'ArrowLeft' ||
+          event.key === 'ArrowRight' ||
+          event.metaKey ||
+          event.ctrlKey
+        ) {
+          event.preventDefault()
+        }
+        return
+      }
       const target = event.target as HTMLElement | null
       const typingInField =
         target != null &&
@@ -123,6 +140,7 @@ export function TopToolbar() {
     setProjectName,
     togglePlayback,
     undo,
+    session.interactive,
   ])
 
   const beginEditingName = () => {
@@ -173,38 +191,45 @@ export function TopToolbar() {
 
       <div className="h-4 w-px bg-fb-border" aria-hidden />
 
-      {editingName ? (
-        <input
-          ref={inputRef}
-          value={draftName}
-          onChange={(event) => setDraftName(event.target.value)}
-          onBlur={commitName}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') commitName()
-            if (event.key === 'Escape') {
-              setDraftName(projectName)
-              setEditingName(false)
-            }
-          }}
-          aria-label="Project name"
-          className="h-7 min-w-[160px] rounded border border-fb-border-strong bg-fb-app px-2 text-[13px] text-fb-text caret-fb-text scheme-dark"
-        />
+      {session.structureReady ? (
+        editingName ? (
+          <input
+            ref={inputRef}
+            value={draftName}
+            onChange={(event) => setDraftName(event.target.value)}
+            onBlur={commitName}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commitName()
+              if (event.key === 'Escape') {
+                setDraftName(projectName)
+                setEditingName(false)
+              }
+            }}
+            aria-label="Project name"
+            className="h-7 min-w-[160px] rounded border border-fb-border-strong bg-fb-app px-2 text-[13px] text-fb-text caret-fb-text scheme-dark"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={beginEditingName}
+            disabled={!session.interactive}
+            className="h-7 rounded px-2 text-left text-[13px] font-medium text-fb-text hover:bg-white/[0.06] disabled:cursor-default disabled:hover:bg-transparent"
+            title={session.interactive ? 'Rename project' : 'Opening project'}
+          >
+            {projectName}
+          </button>
+        )
       ) : (
-        <button
-          type="button"
-          onClick={beginEditingName}
-          className="h-7 rounded px-2 text-left text-[13px] font-medium text-fb-text hover:bg-white/[0.06]"
-          title="Rename project"
-        >
-          {projectName}
-        </button>
+        <ToolbarNameSkeleton />
       )}
 
       <div className="flex items-center gap-1.5 text-[12px] text-fb-muted">
         <Circle
           size={8}
           className={
-            saveStatus === 'saved'
+            session.statusLabel
+              ? 'fill-fb-accent text-fb-accent'
+              : saveStatus === 'saved'
               ? 'fill-emerald-500 text-emerald-500'
               : saveStatus === 'error'
                 ? 'fill-fb-danger text-fb-danger'
@@ -212,15 +237,23 @@ export function TopToolbar() {
           }
           aria-hidden
         />
-        <span>{statusLabel}</span>
+        <span>
+          {session.statusLabel ??
+            (session.interactive
+              ? statusLabel
+              : session.phase === 'needs-workspace'
+                ? 'Reconnect workspace'
+                : 'Opening project…')}
+        </span>
       </div>
 
       <div className="ml-auto flex items-center gap-2">
         <button
           type="button"
           onClick={() => requestSave()}
+          disabled={!session.interactive}
           title={`Save (${projectSaveShortcutLabel()})`}
-          className="h-7 rounded-md border border-fb-border bg-white/[0.06] px-2.5 text-[12px] font-medium text-fb-text hover:bg-white/[0.1]"
+          className="h-7 rounded-md border border-fb-border bg-white/[0.06] px-2.5 text-[12px] font-medium text-fb-text hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-40"
         >
           Save
         </button>
@@ -228,7 +261,8 @@ export function TopToolbar() {
           <button
             type="button"
             onClick={() => setShareOpen(true)}
-            className="h-7 rounded-md border border-fb-border bg-white/[0.06] px-2.5 text-[12px] font-medium text-fb-text hover:bg-white/[0.1]"
+            disabled={!session.interactive}
+            className="h-7 rounded-md border border-fb-border bg-white/[0.06] px-2.5 text-[12px] font-medium text-fb-text hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-40"
           >
             Share
           </button>

@@ -500,3 +500,54 @@ describe('resolveActiveVideoClip', () => {
     expect(resolveActiveVideoClip(doc, 1000)?.clip.id).toBe('front')
   })
 })
+
+describe('getPlaybackEndMs', () => {
+  it('is zero for an empty document', () => {
+    expect(
+      getPlaybackEndMs(
+        project({ tracks: [], clips: [], mediaSources: [] }),
+      ),
+    ).toBe(0)
+  })
+
+  it('is zero when tracks exist but there are no clips', () => {
+    expect(
+      getPlaybackEndMs(
+        project({
+          tracks: [
+            track({ id: 'v1', name: 'Video 1', kind: 'video', order: 0 }),
+            track({ id: 'a1', name: 'Audio 1', kind: 'audio', order: 1 }),
+          ],
+          clips: [],
+          mediaSources: [],
+        }),
+      ),
+    ).toBe(0)
+  })
+
+  it('uses clip ends even when the media file is not available', () => {
+    const unavailable = media({
+      id: 'm1',
+      name: 'A.mp4',
+      kind: 'video',
+      durationMs: 4000,
+    })
+    unavailable.availability = 'missing'
+    const doc = project({
+      tracks: [track({ id: 'v1', name: 'Video 1', kind: 'video', order: 0 })],
+      clips: [
+        clip({
+          id: 'c1',
+          mediaSourceId: 'm1',
+          trackId: 'v1',
+          timelineStartMs: 0,
+          sourceInMs: 0,
+          sourceOutMs: 2500,
+        }),
+      ],
+      mediaSources: [unavailable],
+    })
+    expect(getPlaybackEndMs(doc)).toBe(2500)
+    expect(resolvePlaybackAt(doc, 0).status).toBe('clip')
+  })
+})

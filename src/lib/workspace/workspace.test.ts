@@ -247,6 +247,6 @@ describe('local workspace', () => {
       kind: 'local',
       key: 'media_a',
     })
-    expect(payload.document.mediaSources[0]?.availability).toBe('known')
+    expect(JSON.stringify(payload)).not.toContain('availability')
   })
 })

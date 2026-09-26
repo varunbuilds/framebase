@@ -1,13 +1,19 @@
+import { getRouteApi } from '@tanstack/react-router'
 import { ChevronLeft, ChevronRight, Pause, Play, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import {
   getPlaybackEndMs,
   resolvePlaybackAt,
 } from '@/features/editor/playback'
+import { playbackEnabled, previewFrameReady } from '@/features/editor/editor-session'
+import { useEditorSession } from '@/features/editor/editor-session-context'
+import { PreviewFrameSkeleton } from '@/components/layout/EditorSkeletons'
 import { useTimelinePlayback } from '@/features/editor/use-timeline-playback'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { useEditorStore } from '@/stores/editor-store'
 import { formatTimecode, stepPlayheadMs } from '@/utils/time'
+
+const editorRoute = getRouteApi('/authenticated/editor/$projectId')
 
 function PreviewTimecode() {
   const playheadMs = useEditorStore((state) => state.ui.playheadMs)
@@ -59,15 +65,34 @@ function PreviewGap() {
 }
 
 export function PreviewPanel() {
-  const aspectRatio = useEditorStore((state) => state.document.canvas.aspectRatio)
+  const session = useEditorSession()
+  const loaded = editorRoute.useLoaderData()
+  const document = useEditorStore((state) => state.document)
+  const playheadMs = useEditorStore((state) => state.ui.playheadMs)
+  const aspectRatio = session.structureReady
+    ? document.canvas.aspectRatio
+    : loaded.document.canvas.aspectRatio
   const [frameWidth, frameHeight] = aspectRatio.split(':').map(Number)
-  const timelineDurationMs = useEditorStore((state) =>
-    getPlaybackEndMs(state.document),
-  )
+  const timelineDurationMs = getPlaybackEndMs(document)
   const isPlaying = useEditorStore((state) => state.ui.isPlaying)
   const togglePlayback = useEditorStore((state) => state.togglePlayback)
   const seekTo = useEditorStore((state) => state.seekTo)
   const pause = useEditorStore((state) => state.pause)
+  const resolution = resolvePlaybackAt(document, playheadMs)
+  const activeClipNeedsSource = resolution.status === 'clip'
+  const sourceReady =
+    resolution.status === 'clip' && Boolean(getObjectUrl(resolution.mediaSourceId))
+  const frameReady = previewFrameReady({
+    structureReady: session.structureReady,
+    interactive: session.interactive,
+    activeClipNeedsSource,
+    sourceReady,
+  })
+  const canPlay = playbackEnabled({
+    interactive: session.interactive,
+    activeClipNeedsSource,
+    sourceReady,
+  })
 
   const mediaRef = useRef<HTMLVideoElement>(null)
   const lastAudibleVolumeRef = useRef(1)
@@ -85,6 +110,7 @@ export function PreviewPanel() {
   }, [silent, volume])
 
   const stepFrame = (frames: number) => {
+    if (!canPlay) return
     if (isPlaying) pause()
     seekTo(stepPlayheadMs(useEditorStore.getState().ui.playheadMs, frames))
   }
@@ -129,12 +155,12 @@ export function PreviewPanel() {
         >
           <video
             ref={mediaRef}
-            className="h-full w-full object-contain"
+            className={`h-full w-full object-contain ${frameReady ? '' : 'invisible'}`}
             playsInline
             preload="auto"
             aria-label="Timeline preview"
           />
-          <PreviewGap />
+          {frameReady ? <PreviewGap /> : <PreviewFrameSkeleton />}
         </div>
       </div>
 
@@ -145,8 +171,10 @@ export function PreviewPanel() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => seekTo(0)}
-            disabled={timelineDurationMs <= 0}
+            onClick={() => {
+              if (canPlay) seekTo(0)
+            }}
+            disabled={!canPlay || timelineDurationMs <= 0}
             aria-label="Go to start"
             title="Go to start"
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-white/65 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-white/[0.08]"
@@ -156,7 +184,7 @@ export function PreviewPanel() {
           <button
             type="button"
             onClick={() => stepFrame(-1)}
-            disabled={timelineDurationMs <= 0}
+            disabled={!canPlay || timelineDurationMs <= 0}
             aria-label="Previous frame"
             title="Previous frame (←)"
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-white/65 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-white/[0.08]"
@@ -165,8 +193,10 @@ export function PreviewPanel() {
           </button>
           <button
             type="button"
-            onClick={() => togglePlayback()}
-            disabled={timelineDurationMs <= 0 && !isPlaying}
+            onClick={() => {
+              if (canPlay) togglePlayback()
+            }}
+            disabled={!canPlay || (timelineDurationMs <= 0 && !isPlaying)}
             aria-label={isPlaying ? 'Pause' : 'Play'}
             title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-black outline-none disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-white/85 focus-visible:outline-none"
@@ -180,7 +210,7 @@ export function PreviewPanel() {
           <button
             type="button"
             onClick={() => stepFrame(1)}
-            disabled={timelineDurationMs <= 0}
+            disabled={!canPlay || timelineDurationMs <= 0}
             aria-label="Next frame"
             title="Next frame (→)"
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-white/65 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-white/[0.08]"
@@ -189,8 +219,10 @@ export function PreviewPanel() {
           </button>
           <button
             type="button"
-            onClick={() => seekTo(timelineDurationMs)}
-            disabled={timelineDurationMs <= 0}
+            onClick={() => {
+              if (canPlay) seekTo(timelineDurationMs)
+            }}
+            disabled={!canPlay || timelineDurationMs <= 0}
             aria-label="Go to end"
             title="Go to end"
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-white/65 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-white/[0.08]"
@@ -202,10 +234,11 @@ export function PreviewPanel() {
           <button
             type="button"
             onClick={toggleMute}
+            disabled={!session.interactive}
             aria-label={silent ? 'Unmute' : 'Mute'}
             aria-pressed={silent}
             title={silent ? 'Unmute' : 'Mute'}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-white/65 hover:bg-white/[0.08]"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-white/65 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
           >
             <VolumeIcon size={15} strokeWidth={1.75} />
           </button>
@@ -220,7 +253,7 @@ export function PreviewPanel() {
             aria-valuetext={silent ? 'Muted' : `${Math.round(volume * 100)}%`}
             title="Volume"
             style={{ ['--volume-pct' as string]: `${volume * 100}%` }}
-            className="volume-slider"
+            disabled={!session.interactive}
           />
         </div>
       </div>

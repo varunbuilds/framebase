@@ -9,9 +9,47 @@ import {
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { useEditorStore } from '@/stores/editor-store'
 import type { ProjectDocument } from '@/types/timeline'
+import type { EditorUiState } from '@/types/editor'
 import { msToSeconds, secondsToMs } from '@/utils/time'
 
 const SEEK_EPSILON_SEC = 0.05
+
+type PausedSyncSnapshot = {
+  document: ProjectDocument
+  playheadMs: EditorUiState['playheadMs']
+  isPlaying: boolean
+  seekVersion: number
+}
+
+/**
+ * Recording a playback error must not run paused sync again.
+ * Sync follows the document, playhead, and play/pause only.
+ */
+export function pausedPlaybackFollowsChange(
+  previous: PausedSyncSnapshot,
+  next: PausedSyncSnapshot,
+): boolean {
+  return (
+    previous.document !== next.document ||
+    previous.playheadMs !== next.playheadMs ||
+    previous.isPlaying !== next.isPlaying ||
+    previous.seekVersion !== next.seekVersion
+  )
+}
+
+/**
+ * A clip without bytes is still loading. That is not a playback failure,
+ * and it must not call setPlaybackError from inside paused sync.
+ */
+export function pausedPreviewStep(args: {
+  status: 'clip' | 'gap' | 'ended' | 'empty'
+  hasMediaElement: boolean
+  hasObjectUrl: boolean
+}): 'idle' | 'not-ready' | 'attach' {
+  if (args.status !== 'clip') return 'idle'
+  if (!args.hasMediaElement || !args.hasObjectUrl) return 'not-ready'
+  return 'attach'
+}
 
 /**
  * Drives timeline playhead + a single HTMLMediaElement from store UI state.
@@ -59,17 +97,19 @@ export function useTimelinePlayback(
 
       const media = mediaRef.current
       const resolution = resolvePlaybackAt(doc, ui.playheadMs)
+      const objectUrl =
+        resolution.status === 'clip' ? getObjectUrl(resolution.mediaSourceId) : undefined
+      const step = pausedPreviewStep({
+        status: resolution.status,
+        hasMediaElement: Boolean(media),
+        hasObjectUrl: Boolean(objectUrl),
+      })
 
-      if (resolution.status !== 'clip') {
+      if (step === 'idle') {
         if (media && !media.paused) media.pause()
         return
       }
-
-      if (!media) return
-
-      const objectUrl = getObjectUrl(resolution.mediaSourceId)
-      if (!objectUrl) {
-        setPlaybackError('Media file is unavailable for the active clip.')
+      if (step === 'not-ready' || !media || resolution.status !== 'clip' || !objectUrl) {
         return
       }
 
@@ -102,7 +142,27 @@ export function useTimelinePlayback(
     }
 
     syncPaused()
-    const unsubscribe = useEditorStore.subscribe(syncPaused)
+    const unsubscribe = useEditorStore.subscribe((state, previous) => {
+      if (
+        !pausedPlaybackFollowsChange(
+          {
+            document: previous.document,
+            playheadMs: previous.ui.playheadMs,
+            isPlaying: previous.ui.isPlaying,
+            seekVersion: previous.ui.seekVersion,
+          },
+          {
+            document: state.document,
+            playheadMs: state.ui.playheadMs,
+            isPlaying: state.ui.isPlaying,
+            seekVersion: state.ui.seekVersion,
+          },
+        )
+      ) {
+        return
+      }
+      syncPaused()
+    })
     return () => {
       unsubscribe()
       detachLoaded?.()

@@ -3,8 +3,8 @@ import migrationSql from '../../../supabase/migrations/20260926173100_source_med
 import cloudMediaSource from './cloud-media.ts?raw'
 import sourceStorageSource from './source-storage.ts?raw'
 import workspaceMediaStoreSource from '../workspace/workspace-media-store.ts?raw'
-import { createEmptyProject, deserializeProject } from '@/features/editor/project'
-import { durableProjectPayload } from '@/features/projects/document'
+import { createEmptyProject } from '@/features/editor/project'
+import { durableProjectPayload, readStoredProject } from '@/features/projects/document'
 import { createMemoryMediaStore } from '@/lib/media/memory-media-store'
 import { hydrateDocumentMedia } from '@/lib/media/hydrate-project-media'
 import { createMemoryDirectory } from '@/lib/workspace/memory-directory'
@@ -259,7 +259,7 @@ describe('shared cloud media', () => {
     expect(json).not.toContain('waveform')
     expect(json).toContain('media/media_1/source')
     expect(payload.document.mediaSources[0]?.remote?.sizeBytes).toBe(4)
-    const reloaded = deserializeProject(JSON.stringify(payload))
+    const reloaded = readStoredProject(payload, PROJECT_ID)
     expect(reloaded.mediaSources[0]?.remote?.storagePath).toBe('media/media_1/source')
   })
 
@@ -267,7 +267,7 @@ describe('shared cloud media', () => {
     const document = createEmptyProject('Cut', PROJECT_ID)
     document.mediaSources = [source()]
     const payload = durableProjectPayload(document)
-    const loaded = deserializeProject(JSON.stringify(payload))
+    const loaded = readStoredProject(payload, PROJECT_ID)
     expect(loaded.mediaSources[0]?.remote).toBeUndefined()
     expect(loaded.mediaSources[0]?.locator).toEqual({ kind: 'local', key: 'media_1' })
     expect(loaded.mediaSources[0]?.name).toBe('clip.mp4')

@@ -10,7 +10,9 @@ import {
 import { clearCloudTransfer, getCloudTransfer, setCloudTransfer } from './cloud-transfer'
 import { deleteMedia, getMedia, hasMedia, saveMedia } from './opfs-media-store'
 import { getObjectUrl, setObjectUrl } from './object-urls'
+import { shareMediaDownload } from './sync-project-media'
 import { browserSourceStorage, readBrowserStorageSession } from './source-storage'
+import { isWorkspaceReady } from '@/lib/workspace/workspace-manager'
 
 const storage = browserSourceStorage()
 
@@ -62,10 +64,18 @@ async function runUpload(source: MediaSource): Promise<void> {
   }
 }
 
-/** Explicit download. Opening a project does not call this. */
+/** Manual retry. Project open syncs cloud media without this button. */
 export function beginCloudDownload(source: MediaSource): void {
   if (!source.remote) return
   if (getObjectUrl(source.id)) return
+  if (!isWorkspaceReady()) {
+    setCloudTransfer(source.id, {
+      phase: 'error',
+      progress: null,
+      message: 'Reconnect the workspace before downloading media.',
+    })
+    return
+  }
   if (getCloudTransfer(source.id)?.phase === 'downloading') return
   setCloudTransfer(source.id, { phase: 'downloading', progress: null, message: null })
   void runDownload(source)
@@ -73,21 +83,10 @@ export function beginCloudDownload(source: MediaSource): void {
 
 async function runDownload(source: MediaSource): Promise<void> {
   try {
-    const result = await downloadRemoteSource({
-      source,
-      hasLocal: () => hasMedia(source.id),
-      authenticated: async () => Boolean(await readBrowserStorageSession()),
-      client: storage,
-      writeLocal: (body) =>
-        saveMedia(source.id, body, { name: source.name, mimeType: source.mimeType }),
-      readLocal: async () => (await getMedia(source.id))?.blob ?? null,
-      deleteLocal: () => deleteMedia(source.id),
-    })
-    if (result === 'downloaded' || result === 'skipped') {
-      if (!getObjectUrl(source.id)) {
-        const stored = await getMedia(source.id)
-        if (stored) setObjectUrl(source.id, URL.createObjectURL(stored.blob))
-      }
+    await downloadSharedSource(source)
+    if (!getObjectUrl(source.id)) {
+      const stored = await getMedia(localMediaKey(source))
+      if (stored) setObjectUrl(source.id, URL.createObjectURL(stored.blob))
     }
     clearCloudTransfer(source.id)
   } catch (error) {
@@ -114,3 +113,34 @@ export async function deleteProjectCloudMedia(document: ProjectDocument): Promis
 }
 
 export type { RemoteMediaReference }
+
+function localMediaKey(source: MediaSource): string {
+  if (source.locator.kind === 'local' || source.locator.kind === 'opfs') {
+    return source.locator.key
+  }
+  return source.id
+}
+
+/** Downloads one remote source into the workspace. Shares an in-flight download. */
+export function downloadSharedSource(source: MediaSource): Promise<void> {
+  if (!isWorkspaceReady()) {
+    return Promise.reject(
+      new CloudMediaError('failed', 'Reconnect the workspace before downloading media.'),
+    )
+  }
+  return shareMediaDownload(source.id, async () => {
+    await downloadRemoteSource({
+      source,
+      hasLocal: () => hasMedia(localMediaKey(source)),
+      authenticated: async () => Boolean(await readBrowserStorageSession()),
+      client: storage,
+      writeLocal: (body) =>
+        saveMedia(localMediaKey(source), body, {
+          name: source.name,
+          mimeType: source.mimeType,
+        }),
+      readLocal: async () => (await getMedia(localMediaKey(source)))?.blob ?? null,
+      deleteLocal: () => deleteMedia(localMediaKey(source)),
+    })
+  })
+}

@@ -54,7 +54,7 @@ describe('project documents for persistence', () => {
     expect(loaded.canvas.aspectRatio).toBe('9:16')
   })
 
-  it('serializes runtime media as known and drops non-document fields', () => {
+  it('omits local availability and drops non-document fields', () => {
     const document = sampleDocument()
     const withRuntime = {
       ...document,
@@ -64,7 +64,8 @@ describe('project documents for persistence', () => {
       })),
     }
     const payload = durableProjectPayload(withRuntime as ProjectDocument)
-    expect(payload.document.mediaSources[0]?.availability).toBe('known')
+    expect(payload.document.mediaSources[0]).not.toHaveProperty('availability')
+    expect(JSON.stringify(payload)).not.toContain('availability')
     expect(JSON.stringify(payload)).not.toContain('blob:')
     expect(JSON.stringify(payload)).not.toContain('objectUrl')
   })
@@ -81,7 +82,8 @@ describe('project documents for persistence', () => {
     const payload = durableProjectPayload(document)
     const source = payload.document.mediaSources[0]
     expect(source?.locator).toEqual({ kind: 'opfs', key: 'media_1' })
-    expect(source?.availability).toBe('known')
+    expect(source).not.toHaveProperty('availability')
+    expect(JSON.stringify(payload)).not.toContain('availability')
     expect(JSON.stringify(payload)).not.toContain('blob:')
     expect(JSON.stringify(payload)).not.toContain('objectUrl')
   })
@@ -100,7 +102,7 @@ describe('project documents for persistence', () => {
       kind: 'opfs',
       key: 'media_1',
     })
-    expect(payload.document.mediaSources[0]?.availability).toBe('known')
+    expect(JSON.stringify(payload)).not.toContain('availability')
     const loaded = readStoredProject(payload, document.id)
     const prepared = prepareLoadedDocument(loaded, () => false)
     expect(prepared.mediaSources[0]?.locator).toEqual({ kind: 'opfs', key: 'media_1' })
@@ -111,7 +113,15 @@ describe('project documents for persistence', () => {
     const payload = durableProjectPayload(sampleDocument())
     const loaded = readStoredProject(payload, payload.document.id)
     expect(loaded.name).toBe('Interview')
+    expect(JSON.stringify(payload)).not.toContain('availability')
     expect(loaded.mediaSources[0]?.availability).toBe('known')
+
+    const prior = structuredClone(payload) as {
+      document: { mediaSources: Array<Record<string, unknown>> }
+    }
+    prior.document.mediaSources[0]!.availability = 'available'
+    const ignored = readStoredProject(prior, payload.document.id)
+    expect(ignored.mediaSources[0]?.availability).toBe('known')
 
     expect(() => readStoredProject(payload, ownerId)).toThrow(/does not match/)
     expect(() => readStoredProject({ version: 1, document: { id: 'x' } }, 'x')).toThrow()

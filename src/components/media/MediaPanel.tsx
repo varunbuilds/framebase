@@ -2,7 +2,7 @@ import { Film, Music2, Plus, Trash2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { discardImportedMedia, importLocalMediaFile, MEDIA_ACCEPT } from '@/lib/media/import'
 import { beginCloudUpload } from '@/lib/media/publish-source'
-import { useCloudUiRevision } from '@/lib/media/cloud-transfer'
+import { getCloudTransfer, useCloudUiRevision } from '@/lib/media/cloud-transfer'
 import {
   chooseWorkspace,
   isWorkspaceReady,
@@ -13,6 +13,8 @@ import { beginMediaDrag, endMediaDrag } from '@/lib/media/media-drag'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { useEditorStore } from '@/stores/editor-store'
 import { MediaCloudStatus } from './MediaCloudStatus'
+import { MediaPanelSkeleton } from '@/components/layout/EditorSkeletons'
+import { useEditorSession } from '@/features/editor/editor-session-context'
 
 const MARQUEE_SLOP_PX = 4
 
@@ -45,6 +47,7 @@ export function MediaPanel() {
   const setImportError = useEditorStore((state) => state.setImportError)
   const setImportStatus = useEditorStore((state) => state.setImportStatus)
   const workspace = useWorkspace()
+  const session = useEditorSession()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef(new Map<string, HTMLLIElement>())
@@ -117,6 +120,7 @@ export function MediaPanel() {
   }
 
   const onPanelPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!session.interactive) return
     if (event.button !== 0) return
     const target = event.target as HTMLElement
     if (target.closest('[data-media-item]')) return
@@ -184,6 +188,7 @@ export function MediaPanel() {
     event: React.MouseEvent<HTMLButtonElement>,
     id: string,
   ) => {
+    if (!session.interactive) return
     if (event.metaKey || event.ctrlKey) {
       const next = selectedMediaSourceIds.includes(id)
         ? selectedMediaSourceIds.filter((item) => item !== id)
@@ -217,7 +222,7 @@ export function MediaPanel() {
         <button
           type="button"
           onClick={() => void beginImport()}
-          disabled={importStatus === 'importing'}
+          disabled={!session.interactive || importStatus === 'importing'}
           className="inline-flex h-7 items-center gap-1 rounded-md border border-white/10 bg-white/[0.07] px-2 text-[11px] font-medium text-fb-text hover:bg-white/[0.12] disabled:opacity-50"
         >
           <Plus size={12} strokeWidth={2} />
@@ -242,7 +247,9 @@ export function MediaPanel() {
         onPointerUp={endMarquee}
         onPointerCancel={endMarquee}
       >
-        {mediaSources.length === 0 ? (
+        {!session.structureReady ? (
+          <MediaPanelSkeleton />
+        ) : mediaSources.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center">
             <Film size={20} className="text-fb-subtle" strokeWidth={1.5} />
             <p className="text-[12px] font-medium text-fb-text">Import your media here.</p>
@@ -255,6 +262,10 @@ export function MediaPanel() {
             {mediaSources.map((source) => {
               const selected = selectedMediaSourceIds.includes(source.id)
               const objectUrl = getObjectUrl(source.id)
+              const bytesPending =
+                !session.interactive &&
+                !objectUrl &&
+                getCloudTransfer(source.id)?.phase !== 'error'
               return (
                 <li
                   key={source.id}
@@ -273,8 +284,12 @@ export function MediaPanel() {
                   >
                     <button
                       type="button"
-                      draggable
+                      draggable={session.interactive}
                       onDragStart={(event) => {
+                        if (!session.interactive) {
+                          event.preventDefault()
+                          return
+                        }
                         const ids = selectedMediaSourceIds.includes(source.id)
                           ? selectedMediaSourceIds
                           : [source.id]
@@ -286,7 +301,9 @@ export function MediaPanel() {
                       }}
                       onDragEnd={() => endMediaDrag()}
                       onClick={(event) => onItemClick(event, source.id)}
-                      onDoubleClick={() => addClip(source.id)}
+                      onDoubleClick={() => {
+                        if (session.interactive) addClip(source.id)
+                      }}
                       title="Click to select. Command-click or drag a box to select more, then drag the group onto the timeline."
                       className="block w-full cursor-default text-left"
                     >
@@ -309,12 +326,20 @@ export function MediaPanel() {
                             )}
                           </span>
                         )}
+                        {bytesPending ? (
+                          <span className="absolute inset-0 animate-pulse bg-white/[0.06] motion-reduce:animate-none" />
+                        ) : null}
                       </span>
-                      {source.availability === 'loading' && (
-                        <span className="mt-1 block truncate px-0.5 text-[10px] text-fb-subtle">
-                          Loading media…
-                        </span>
-                      )}
+                    {bytesPending ? (
+                      <span className="mt-1 block truncate px-0.5 text-[10px] text-fb-subtle">
+                        Syncing media…
+                      </span>
+                    ) : null}
+                    {source.availability === 'loading' && (
+                      <span className="mt-1 block truncate px-0.5 text-[10px] text-fb-subtle">
+                        Loading media…
+                      </span>
+                    )}
                       {source.availability === 'error' && (
                         <span className="mt-1 block truncate px-0.5 text-[10px] text-fb-danger">
                           Could not read this file
@@ -332,17 +357,21 @@ export function MediaPanel() {
                         )}
                       </span>
                     </button>
-                    {source.availability !== 'loading' && <MediaCloudStatus source={source} />}
-                    <div className="absolute top-2 right-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
-                      <button
-                        type="button"
-                        onClick={() => unregisterMediaSource(source.id)}
-                        aria-label={`Remove ${source.name}`}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded bg-black/45 text-fb-muted hover:bg-red-50 hover:text-fb-danger"
-                      >
-                        <Trash2 size={12} strokeWidth={1.75} />
-                      </button>
-                    </div>
+                    {!bytesPending && source.availability !== 'loading' ? (
+                      <MediaCloudStatus source={source} />
+                    ) : null}
+                    {session.interactive ? (
+                      <div className="absolute top-2 right-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+                        <button
+                          type="button"
+                          onClick={() => unregisterMediaSource(source.id)}
+                          aria-label={`Remove ${source.name}`}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded bg-black/45 text-fb-muted hover:bg-red-50 hover:text-fb-danger"
+                        >
+                          <Trash2 size={12} strokeWidth={1.75} />
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </li>
               )

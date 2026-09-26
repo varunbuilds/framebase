@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { projectContentEqual } from '@/features/editor/project'
+import { durableProjectPayload } from './document'
 import { useEditorStore } from '@/stores/editor-store'
 import type { ProjectDocument } from '@/types/timeline'
 import { mirrorCurrentProject } from '@/lib/workspace/workspace-manager'
@@ -50,7 +50,11 @@ export function useProjectAutosave(projectId: string) {
         lastWritten = next
       },
       isWritten(next: ProjectDocument) {
-        return lastWritten != null && projectContentEqual(next, lastWritten)
+        if (!lastWritten) return false
+        return (
+          JSON.stringify(durableProjectPayload(next)) ===
+          JSON.stringify(durableProjectPayload(lastWritten))
+        )
       },
       prime() {
         if (primed) return false

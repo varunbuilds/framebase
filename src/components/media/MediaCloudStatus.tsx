@@ -16,15 +16,15 @@ export function MediaCloudStatus({ source }: { source: MediaSource }) {
   return (
     <div className="mt-1 flex items-center gap-1 px-0.5 text-[10px] text-fb-subtle">
       <span className="truncate">{view.text}</span>
-      {view.action === 'download' && (
+      {view.action === 'download' || view.action === 'retry' ? (
         <button
           type="button"
           className="shrink-0 rounded bg-white/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-fb-text hover:bg-white/[0.14]"
           onClick={() => beginCloudDownload(source)}
         >
-          Download
+          {view.action === 'retry' ? 'Retry' : 'Download'}
         </button>
-      )}
+      ) : null}
       {view.action === 'upload' && (
         <button
           type="button"
