@@ -17,6 +17,25 @@ type HydrateOptions = {
 
 const inflight = new Map<string, Promise<HydratedProjectMedia>>()
 
+function hydrationKey(document: ProjectDocument): string {
+  const media = document.mediaSources
+    .map((source) => {
+      const locator =
+        source.locator.kind === 'runtime'
+          ? 'runtime'
+          : `${source.locator.kind}:${source.locator.key}`
+      return `${source.id}=${locator}`
+    })
+    .sort()
+    .join(',')
+  return `${document.id}|${media}`
+}
+
+/** Drop in-flight hydrations. Does not touch OPFS bytes. */
+export function clearHydrationCache(): void {
+  inflight.clear()
+}
+
 function mediaLog(message: string, details?: unknown): void {
   if (!import.meta.env.DEV || import.meta.env.MODE === 'test') return
   console.info('[framebase-media]', message, details ?? '')
@@ -32,12 +51,13 @@ export function hydrateDocumentMediaOnce(
   document: ProjectDocument,
   options?: HydrateOptions,
 ): Promise<HydratedProjectMedia> {
-  const existing = inflight.get(document.id)
+  const key = hydrationKey(document)
+  const existing = inflight.get(key)
   if (existing) return existing
   const promise = hydrateDocumentMedia(document, options).finally(() => {
-    if (inflight.get(document.id) === promise) inflight.delete(document.id)
+    if (inflight.get(key) === promise) inflight.delete(key)
   })
-  inflight.set(document.id, promise)
+  inflight.set(key, promise)
   return promise
 }
 
@@ -47,6 +67,16 @@ export function commitHydratedDocument(args: {
   hydrated: ProjectDocument
   load: (document: ProjectDocument) => void
 }): boolean {
+  mediaLog('hydrate commit', {
+    active: args.active,
+    projectId: args.hydrated.id,
+    media: args.hydrated.mediaSources.map((source) => ({
+      id: source.id,
+      locator: source.locator,
+      availability: source.availability,
+      hasObjectUrl: Boolean(getObjectUrl(source.id)),
+    })),
+  })
   if (!args.active) return false
   args.load(args.hydrated)
   return true
@@ -84,7 +114,14 @@ export async function hydrateDocumentMedia(
           : { ...source, availability: 'missing' as const }
       }
       if (source.locator.kind !== 'opfs') return source
-      return attachOpfsSource(source, store, attach, attachedIds, options?.onStatus)
+      return attachOpfsSource(
+        document.id,
+        source,
+        store,
+        attach,
+        attachedIds,
+        options?.onStatus,
+      )
     }),
   )
 
@@ -105,6 +142,7 @@ export async function hydrateDocumentMedia(
 }
 
 async function attachOpfsSource(
+  projectId: string,
   source: MediaSource,
   store: MediaByteStore,
   attach: (mediaSourceId: string, file: Blob) => void,
@@ -115,12 +153,17 @@ async function attachOpfsSource(
   onStatus?.(source.id, 'loading')
   try {
     const present = await store.has(source.locator.key)
-    const stored = present ? await store.get(source.locator.key) : null
+    // Read the bytes even when has() missed. A false negative must not
+    // discard a file that get() can still open.
+    const stored = await store.get(source.locator.key)
+    let objectUrlCreated = false
     mediaLog('opfs read', {
+      projectId,
       mediaSourceId: source.id,
-      key: source.locator.key,
+      locator: source.locator,
       hasMedia: present,
-      gotBytes: Boolean(stored),
+      getMedia: Boolean(stored),
+      availability: stored ? 'available' : 'missing',
     })
     if (!stored) {
       if (import.meta.env.DEV && import.meta.env.MODE !== 'test') {
@@ -131,6 +174,12 @@ async function attachOpfsSource(
       return { ...source, availability: 'missing' }
     }
     attach(source.id, stored.blob)
+    objectUrlCreated = Boolean(getObjectUrl(source.id))
+    mediaLog('object url result', {
+      projectId,
+      mediaSourceId: source.id,
+      created: objectUrlCreated,
+    })
     attachedIds.push(source.id)
     onStatus?.(source.id, 'available')
     return { ...source, availability: 'available' }

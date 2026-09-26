@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { createEmptyProject } from '@/features/editor/project'
 import type { MediaSource } from '@/types/timeline'
+import { useEditorStore } from '@/stores/editor-store'
 import {
+  clearHydrationCache,
   commitHydratedDocument,
   hydrateDocumentMedia,
   hydrateDocumentMediaOnce,
@@ -172,6 +174,83 @@ describe('media byte store', () => {
     } finally {
       URL.revokeObjectURL = revoke
       revokeObjectUrlIfCurrent('media_shared', 'blob:current')
+    }
+  })
+
+  it('reads bytes when has() is a false negative', async () => {
+    const store = createMemoryMediaStore()
+    const bytes = new Blob([Uint8Array.from([4])], { type: 'video/mp4' })
+    await store.save('media_keep', bytes, { name: 'keep.mp4', mimeType: 'video/mp4' })
+    store.has = async () => false
+    const document = createEmptyProject(
+      'Cut',
+      'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    )
+    document.mediaSources = [opfsSource('media_keep', 'keep.mp4')]
+    const hydrated = await hydrateDocumentMedia(document, {
+      store,
+      attach: () => undefined,
+    })
+    expect(hydrated.document.mediaSources[0]?.availability).toBe('available')
+    expect(hydrated.document.mediaSources[0]?.locator).toEqual({
+      kind: 'opfs',
+      key: 'media_keep',
+    })
+  })
+
+  it('does not reuse a hydration for a different media snapshot', async () => {
+    const store = createMemoryMediaStore()
+    const bytes = new Blob([Uint8Array.from([5])], { type: 'video/mp4' })
+    await store.save('media_later', bytes, { name: 'later.mp4', mimeType: 'video/mp4' })
+    const id = 'abababab-abab-4bab-8bab-abababababab'
+    const empty = createEmptyProject('Cut', id)
+    const withMedia = {
+      ...empty,
+      mediaSources: [opfsSource('media_later', 'later.mp4')],
+    }
+    const emptyResult = await hydrateDocumentMediaOnce(empty, {
+      store,
+      attach: () => undefined,
+    })
+    const mediaResult = await hydrateDocumentMediaOnce(withMedia, {
+      store,
+      attach: () => undefined,
+    })
+    expect(emptyResult.document.mediaSources).toEqual([])
+    expect(mediaResult.document.mediaSources[0]?.availability).toBe('available')
+  })
+
+  it('leaves OPFS bytes in place when an editing session ends', async () => {
+    const store = createMemoryMediaStore()
+    const bytes = new Blob([Uint8Array.from([8])], { type: 'video/mp4' })
+    await store.save('media_session', bytes, {
+      name: 'session.mp4',
+      mimeType: 'video/mp4',
+    })
+    const revoke = URL.revokeObjectURL
+    URL.revokeObjectURL = () => undefined
+    try {
+      setObjectUrl('media_session', 'blob:session')
+      clearHydrationCache()
+      useEditorStore.getState().endEditingSession()
+      expect(getObjectUrl('media_session')).toBeUndefined()
+      expect(useEditorStore.getState().document.id).toBe('unloaded')
+      expect(await store.has('media_session')).toBe(true)
+      expect(await store.get('media_session')).not.toBeNull()
+
+      const document = createEmptyProject(
+        'Cut',
+        'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd',
+      )
+      document.mediaSources = [opfsSource('media_session', 'session.mp4')]
+      const hydrated = await hydrateDocumentMedia(document, {
+        store,
+        attach: (mediaSourceId) => setObjectUrl(mediaSourceId, `blob:${mediaSourceId}`),
+      })
+      expect(hydrated.document.mediaSources[0]?.availability).toBe('available')
+      expect(getObjectUrl('media_session')).toBeDefined()
+    } finally {
+      URL.revokeObjectURL = revoke
     }
   })
 })

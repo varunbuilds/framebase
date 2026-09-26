@@ -26,6 +26,7 @@ export function useTimelinePlayback(
   const setPlaybackError = useEditorStore((state) => state.setPlaybackError)
 
   const attachedMediaIdRef = useRef<string | null>(null)
+  const attachedClipIdRef = useRef<string | null>(null)
   const rafRef = useRef<number | null>(null)
   const lastFrameTsRef = useRef<number | null>(null)
   const playheadRef = useRef(useEditorStore.getState().ui.playheadMs)
@@ -77,6 +78,7 @@ export function useTimelinePlayback(
       if (attachedMediaIdRef.current !== resolution.mediaSourceId) {
         detachLoaded?.()
         attachedMediaIdRef.current = resolution.mediaSourceId
+        attachedClipIdRef.current = resolution.clip.id
         media.src = objectUrl
         const onLoaded = () => {
           applyCurrentTime()
@@ -128,17 +130,22 @@ export function useTimelinePlayback(
     media?.addEventListener('error', onMediaError)
 
     const ensureClipMedia = (
+      clipId: string,
       mediaSourceId: string,
       sourceTimeMs: number,
-    ): HTMLMediaElement | null => {
+    ): { element: HTMLMediaElement; rebound: boolean } | null => {
       const mediaEl = mediaRef.current
       if (!mediaEl) return null
 
       const objectUrl = getObjectUrl(mediaSourceId)
       if (!objectUrl) return null
 
-      if (attachedMediaIdRef.current !== mediaSourceId) {
+      const sameSource = attachedMediaIdRef.current === mediaSourceId
+      const sameClip = attachedClipIdRef.current === clipId
+
+      if (!sameSource) {
         attachedMediaIdRef.current = mediaSourceId
+        attachedClipIdRef.current = clipId
         mediaEl.src = objectUrl
         mediaEl.load()
         const onReady = () => {
@@ -150,10 +157,18 @@ export function useTimelinePlayback(
           }
         }
         mediaEl.addEventListener('loadedmetadata', onReady, { once: true })
-        return mediaEl
+        return { element: mediaEl, rebound: true }
       }
 
-      return mediaEl
+      if (!sameClip) {
+        attachedClipIdRef.current = clipId
+        if (mediaEl.readyState >= 1) {
+          mediaEl.currentTime = msToSeconds(sourceTimeMs)
+        }
+        return { element: mediaEl, rebound: true }
+      }
+
+      return { element: mediaEl, rebound: false }
     }
 
     const tick = (timestamp: number) => {
@@ -213,12 +228,13 @@ export function useTimelinePlayback(
       }
 
       // status === 'clip'
-      const mediaEl = ensureClipMedia(
+      const bound = ensureClipMedia(
+        resolution.clip.id,
         resolution.mediaSourceId,
         resolution.sourceTimeMs,
       )
 
-      if (!mediaEl || !getObjectUrl(resolution.mediaSourceId)) {
+      if (!bound || !getObjectUrl(resolution.mediaSourceId)) {
         timeMs = Math.min(endMs, timeMs + deltaMs)
         playheadRef.current = timeMs
         setPlayheadMs(timeMs)
@@ -226,7 +242,9 @@ export function useTimelinePlayback(
         return
       }
 
-      if (mediaEl.readyState >= 1) {
+      const mediaEl = bound.element
+
+      if (!bound.rebound && mediaEl.readyState >= 1) {
         const expectedSource = timelineToSourceTimeMs(resolution.clip, timeMs)
         const drift = Math.abs(mediaEl.currentTime - msToSeconds(expectedSource))
         if (drift > SEEK_EPSILON_SEC * 2) {
@@ -240,7 +258,11 @@ export function useTimelinePlayback(
         })
       }
 
-      if (!mediaEl.paused && Number.isFinite(mediaEl.currentTime)) {
+      if (
+        !bound.rebound &&
+        !mediaEl.paused &&
+        Number.isFinite(mediaEl.currentTime)
+      ) {
         timeMs = Math.min(
           endMs,
           sourceToTimelineTimeMs(resolution.clip, secondsToMs(mediaEl.currentTime)),

@@ -22,8 +22,9 @@ import {
   unloadedProject,
 } from '@/features/editor/project'
 import { clearFilmstripFramesForObjectUrl } from '@/lib/media/filmstrip-cache'
+import { clearHydrationCache } from '@/lib/media/hydrate-project-media'
 import { deleteMedia } from '@/lib/media/opfs-media-store'
-import { getObjectUrl, revokeObjectUrl } from '@/lib/media/object-urls'
+import { getObjectUrl, revokeAllObjectUrls, revokeObjectUrl } from '@/lib/media/object-urls'
 import { clearWaveformPeaks } from '@/lib/media/waveform'
 import type { ClipDragState, EditorUiState } from '@/types/editor'
 import type { MediaSource, ProjectDocument, TimeMs } from '@/types/timeline'
@@ -43,6 +44,7 @@ interface EditorActions {
     details?: { lastSavedAt?: string | null; saveError?: string | null },
   ) => void
   loadDocument: (document: ProjectDocument, savedAt: string | null) => void
+  endEditingSession: () => void
   selectClip: (
     clipId: string | null,
     options?: { additive?: boolean },
@@ -173,6 +175,16 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     })
     temporal.clear()
     temporal.resume()
+  },
+
+  /**
+   * Drop the in-memory editor and object URLs after sign-out.
+   * OPFS files stay on this device; they are not keyed by the auth user.
+   */
+  endEditingSession: () => {
+    clearHydrationCache()
+    revokeAllObjectUrls()
+    get().loadDocument(unloadedProject, null)
   },
 
   selectClip: (clipId, options) => {

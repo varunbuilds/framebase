@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   advanceThroughGap,
   getPlaybackEndMs,
+  resolveActiveVideoClip,
   resolvePlaybackAt,
   resolvePlaybackTrack,
   sourceToTimelineTimeMs,
@@ -266,5 +267,189 @@ describe('advanceThroughGap', () => {
     const step = advanceThroughGap(doc, 1900, 200)
     expect(step.timelineTimeMs).toBe(2100)
     expect(step.reachedClipOrEnd).toBe(true)
+  })
+})
+
+describe('resolveActiveVideoClip', () => {
+  const foreground = track({
+    id: 'v-front',
+    name: 'Video 2',
+    kind: 'video',
+    order: -1,
+  })
+  const lower = track({ id: 'v1', name: 'Video 1', kind: 'video', order: 0 })
+  const audio = track({ id: 'a1', name: 'Audio 1', kind: 'audio', order: 1 })
+  const upperSource = media({
+    id: 'm-upper',
+    name: 'upper.mp4',
+    kind: 'video',
+    durationMs: 10_000,
+  })
+  const lowerSource = media({
+    id: 'm-lower',
+    name: 'lower.mp4',
+    kind: 'video',
+    durationMs: 10_000,
+  })
+  const audioSource = media({
+    id: 'm-audio',
+    name: 'voice.mp3',
+    kind: 'audio',
+    durationMs: 10_000,
+  })
+
+  function videoClip(
+    id: string,
+    trackId: string,
+    mediaSourceId: string,
+    timelineStartMs: number,
+    durationMs: number,
+  ): Clip {
+    return clip({
+      id,
+      mediaSourceId,
+      trackId,
+      timelineStartMs,
+      sourceInMs: 0,
+      sourceOutMs: durationMs,
+    })
+  }
+
+  it('selects the only clip on a single video track', () => {
+    const doc = project({
+      tracks: [lower],
+      clips: [videoClip('only', 'v1', 'm-lower', 0, 5000)],
+      mediaSources: [lowerSource],
+    })
+
+    expect(resolveActiveVideoClip(doc, 1000)?.clip.id).toBe('only')
+    expect(resolvePlaybackAt(doc, 1000).status).toBe('clip')
+  })
+
+  it('lets the foreground track win when both tracks overlap', () => {
+    const doc = project({
+      tracks: [foreground, lower],
+      clips: [
+        videoClip('front', 'v-front', 'm-upper', 0, 8000),
+        videoClip('under', 'v1', 'm-lower', 0, 8000),
+      ],
+      mediaSources: [upperSource, lowerSource],
+    })
+
+    expect(resolveActiveVideoClip(doc, 0)?.clip.id).toBe('front')
+    expect(resolveActiveVideoClip(doc, 4000)?.track.id).toBe('v-front')
+  })
+
+  it('falls through a foreground gap to the lower video clip', () => {
+    const doc = project({
+      tracks: [foreground, lower],
+      clips: [
+        videoClip('front', 'v-front', 'm-upper', 2000, 2000),
+        videoClip('under', 'v1', 'm-lower', 0, 8000),
+      ],
+      mediaSources: [upperSource, lowerSource],
+    })
+
+    expect(resolveActiveVideoClip(doc, 0)?.clip.id).toBe('under')
+    expect(resolvePlaybackAt(doc, 0).status).toBe('clip')
+  })
+
+  it('activates the lower clip at the instant the foreground clip ends', () => {
+    const doc = project({
+      tracks: [foreground, lower],
+      clips: [
+        videoClip('front', 'v-front', 'm-upper', 0, 5000),
+        videoClip('under', 'v1', 'm-lower', 0, 9000),
+      ],
+      mediaSources: [upperSource, lowerSource],
+    })
+
+    expect(resolveActiveVideoClip(doc, 4999)?.clip.id).toBe('front')
+    expect(resolveActiveVideoClip(doc, 5000)?.clip.id).toBe('under')
+    expect(getPlaybackEndMs(doc)).toBe(9000)
+  })
+
+  it('plays a lower-track clip that starts after the upper clip ends', () => {
+    const doc = project({
+      tracks: [foreground, lower],
+      clips: [
+        videoClip('front', 'v-front', 'm-upper', 0, 5000),
+        videoClip('under', 'v1', 'm-lower', 5000, 4000),
+      ],
+      mediaSources: [upperSource, lowerSource],
+    })
+
+    expect(resolveActiveVideoClip(doc, 0)?.clip.id).toBe('front')
+    expect(resolvePlaybackAt(doc, 4999).status).toBe('clip')
+    const atHandoff = resolvePlaybackAt(doc, 5000)
+    expect(atHandoff.status).toBe('clip')
+    if (atHandoff.status === 'clip') {
+      expect(atHandoff.clip.id).toBe('under')
+      expect(atHandoff.sourceTimeMs).toBe(0)
+    }
+    expect(resolvePlaybackAt(doc, 2500).status).not.toBe('gap')
+  })
+
+  it('treats a clip end as outside that clip', () => {
+    const doc = project({
+      tracks: [lower],
+      clips: [videoClip('only', 'v1', 'm-lower', 0, 5000)],
+      mediaSources: [lowerSource],
+    })
+
+    expect(resolveActiveVideoClip(doc, 5000)).toBeNull()
+    expect(resolvePlaybackAt(doc, 5000).status).toBe('ended')
+  })
+
+  it('returns null when no video clip contains the playhead', () => {
+    const doc = project({
+      tracks: [foreground, lower],
+      clips: [videoClip('later', 'v1', 'm-lower', 4000, 1000)],
+      mediaSources: [lowerSource],
+    })
+
+    expect(resolveActiveVideoClip(doc, 1000)).toBeNull()
+    expect(resolvePlaybackAt(doc, 1000).status).toBe('gap')
+  })
+
+  it('does not select an audio clip as the picture', () => {
+    const doc = project({
+      tracks: [foreground, audio],
+      clips: [
+        clip({
+          id: 'voice',
+          mediaSourceId: 'm-audio',
+          trackId: 'a1',
+          timelineStartMs: 0,
+          sourceInMs: 0,
+          sourceOutMs: 8000,
+        }),
+      ],
+      mediaSources: [audioSource],
+    })
+
+    expect(resolveActiveVideoClip(doc, 1000)).toBeNull()
+    expect(resolvePlaybackAt(doc, 1000).status).toBe('empty')
+  })
+
+  it('still shows a muted or locked video clip', () => {
+    const mutedLocked = track({
+      id: 'v-front',
+      name: 'Video 2',
+      kind: 'video',
+      order: -1,
+    })
+    mutedLocked.muted = true
+    mutedLocked.locked = true
+    const doc = project({
+      tracks: [mutedLocked, lower],
+      clips: [
+        videoClip('front', 'v-front', 'm-upper', 0, 5000),
+        videoClip('under', 'v1', 'm-lower', 0, 5000),
+      ],
+      mediaSources: [upperSource, lowerSource],
+    })
+
+    expect(resolveActiveVideoClip(doc, 1000)?.clip.id).toBe('front')
   })
 })

@@ -1,6 +1,7 @@
 import type { Session } from '@supabase/supabase-js'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase/client'
+import { useEditorStore } from '@/stores/editor-store'
 import { AuthContext, type AuthContextValue, type AuthStatus } from './auth-context-value'
 import { authErrorMessage } from './session'
 
@@ -60,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut: async () => {
         const { error } = await getSupabase().auth.signOut()
         if (error) throw new Error(authErrorMessage(error))
+        useEditorStore.getState().endEditingSession()
       },
     }),
     [session, status],

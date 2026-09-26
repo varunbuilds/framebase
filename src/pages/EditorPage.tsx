@@ -1,5 +1,5 @@
 import { getRouteApi, Link } from '@tanstack/react-router'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { EditorShell } from '@/components/layout/EditorShell'
 import {
   commitHydratedDocument,
@@ -20,14 +20,15 @@ function OpeningProject() {
 
 export function EditorPage() {
   const project = editorRoute.useLoaderData()
-  const documentId = useEditorStore((state) => state.document.id)
   const loadDocument = useEditorStore((state) => state.loadDocument)
   const { id: projectId, document: storedDocument, updatedAt } = project
+  const openKey = `${projectId}:${updatedAt}`
+  const [openedKey, setOpenedKey] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
     void hydrateDocumentMediaOnce(storedDocument).then((hydrated) => {
-      commitHydratedDocument({
+      const committed = commitHydratedDocument({
         active,
         hydrated: hydrated.document,
         load: (document) => {
@@ -37,13 +38,14 @@ export function EditorPage() {
           loadDocument(document, updatedAt)
         },
       })
+      if (committed) setOpenedKey(openKey)
     })
     return () => {
       active = false
     }
-  }, [loadDocument, projectId, storedDocument, updatedAt])
+  }, [loadDocument, openKey, storedDocument, updatedAt])
 
-  if (documentId !== project.id) return <OpeningProject />
+  if (openedKey !== openKey) return <OpeningProject />
 
   return (
     <>

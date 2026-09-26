@@ -86,6 +86,27 @@ describe('project documents for persistence', () => {
     expect(JSON.stringify(payload)).not.toContain('objectUrl')
   })
 
+  it('keeps the OPFS locator when a session marked the file missing', () => {
+    const document = sampleDocument()
+    document.mediaSources = [
+      {
+        ...document.mediaSources[0]!,
+        locator: { kind: 'opfs', key: 'media_1' },
+        availability: 'missing',
+      },
+    ]
+    const payload = durableProjectPayload(document)
+    expect(payload.document.mediaSources[0]?.locator).toEqual({
+      kind: 'opfs',
+      key: 'media_1',
+    })
+    expect(payload.document.mediaSources[0]?.availability).toBe('known')
+    const loaded = readStoredProject(payload, document.id)
+    const prepared = prepareLoadedDocument(loaded, () => false)
+    expect(prepared.mediaSources[0]?.locator).toEqual({ kind: 'opfs', key: 'media_1' })
+    expect(prepared.mediaSources[0]?.availability).toBe('known')
+  })
+
   it('loads a valid stored document and rejects invalid ones', () => {
     const payload = durableProjectPayload(sampleDocument())
     const loaded = readStoredProject(payload, payload.document.id)
