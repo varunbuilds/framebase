@@ -1,4 +1,4 @@
-import { Link, useNavigate } from '@tanstack/react-router'
+import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { useState, type FormEvent } from 'react'
 import {
   AuthScreen,
@@ -6,11 +6,13 @@ import {
   authFieldClass,
 } from '@/components/auth/AuthScreen'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
+import { authRedirectLocation } from '@/features/auth/redirect'
 import { useAuth } from '@/features/auth/use-auth'
 
 export function SignupPage() {
   const { signUp, status } = useAuth()
   const navigate = useNavigate()
+  const { redirect } = useSearch({ from: '/signup' })
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -37,7 +39,7 @@ export function SignupPage() {
         setNotice('Check your email to confirm the account, then sign in.')
         return
       }
-      await navigate({ to: '/projects' })
+      await navigate(authRedirectLocation(redirect))
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not create account.')
     } finally {
@@ -51,7 +53,7 @@ export function SignupPage() {
       footer={
         <>
           Already have an account?{' '}
-          <Link to="/login" search={{ redirect: '' }} className="text-fb-text">
+          <Link to="/login" search={{ redirect }} className="text-fb-text">
             Sign in
           </Link>
         </>
@@ -103,7 +105,7 @@ export function SignupPage() {
         </button>
       </form>
       <div className="mt-4">
-        <GoogleSignInButton disabled={pending} />
+        <GoogleSignInButton redirectTo={redirect} disabled={pending} />
       </div>
     </AuthScreen>
   )

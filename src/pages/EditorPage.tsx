@@ -8,7 +8,11 @@ import {
 import { revokeObjectUrlsExcept } from '@/lib/media/object-urls'
 import { retainRuntimeDerivedCaches } from '@/lib/media/runtime-caches'
 import { copyLegacyOpfsMediaIntoWorkspace } from '@/lib/workspace/workspace-migration'
-import { mirrorCurrentProject } from '@/lib/workspace/workspace-manager'
+import {
+  ensureWorkspaceRestored,
+  mirrorCurrentProject,
+} from '@/lib/workspace/workspace-manager'
+import { afterWorkspaceRestore } from '@/lib/workspace/workspace-restore'
 import { useProjectAutosave } from '@/features/projects/use-project-autosave'
 import { useEditorStore } from '@/stores/editor-store'
 const editorRoute = getRouteApi('/authenticated/editor/$projectId')
@@ -30,7 +34,8 @@ export function EditorPage() {
 
   useEffect(() => {
     let active = true
-    void hydrateDocumentMediaOnce(storedDocument).then((hydrated) => {
+    void afterWorkspaceRestore(ensureWorkspaceRestored, async () => {
+      const hydrated = await hydrateDocumentMediaOnce(storedDocument)
       const committed = commitHydratedDocument({
         active,
         hydrated: hydrated.document,
@@ -41,16 +46,15 @@ export function EditorPage() {
           loadDocument(document, updatedAt)
         },
       })
-      if (committed) {
-        setOpenedKey(openKey)
-        const storedKeys = hydrated.document.mediaSources.flatMap((source) =>
-          source.locator.kind === 'opfs' || source.locator.kind === 'local'
-            ? [source.locator.key]
-            : [],
-        )
-        void copyLegacyOpfsMediaIntoWorkspace(storedKeys)
-        void mirrorCurrentProject(hydrated.document).catch(() => undefined)
-      }
+      if (!active || !committed) return
+      setOpenedKey(openKey)
+      const storedKeys = hydrated.document.mediaSources.flatMap((source) =>
+        source.locator.kind === 'opfs' || source.locator.kind === 'local'
+          ? [source.locator.key]
+          : [],
+      )
+      void copyLegacyOpfsMediaIntoWorkspace(storedKeys)
+      void mirrorCurrentProject(hydrated.document).catch(() => undefined)
     })
     return () => {
       active = false

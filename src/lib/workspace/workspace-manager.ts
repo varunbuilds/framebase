@@ -1,10 +1,14 @@
 import type { ProjectDocument } from '@/types/timeline'
 import { directoryFromHandle } from './file-system-directory'
 import { bindWorkspaceStores } from './store-binding'
+import { createWorkspaceCacheStore } from './workspace-cache-store'
 import {
-  createWorkspaceCacheStore,
-} from './workspace-cache-store'
+  createIndexedDbWorkspaceHandleStore,
+  createMemoryWorkspaceHandleStore,
+  type WorkspaceHandleStore,
+} from './workspace-handle-store'
 import {
+  openExistingWorkspace,
   openOrCreateWorkspace,
   removeProjectDirectory,
   workspaceCacheDirectory,
@@ -14,14 +18,13 @@ import {
 } from './workspace-layout'
 import { createWorkspaceMediaStore } from './workspace-media-store'
 import { readWorkspacePointer, writeWorkspacePointer } from './workspace-pointer'
+import {
+  restoreStoredWorkspace,
+  type StoredDirectoryHandle,
+} from './workspace-restore'
 import type { WorkspaceDirectory, WorkspaceFile, WorkspaceSnapshot } from './workspace-types'
 
 const PICKER_ID = 'framebase-workspace'
-
-type WritableDirectoryHandle = FileSystemDirectoryHandle & {
-  queryPermission(descriptor: { mode: 'readwrite' }): Promise<PermissionState>
-  requestPermission(descriptor: { mode: 'readwrite' }): Promise<PermissionState>
-}
 
 type DirectoryPickerWindow = Window & {
   showDirectoryPicker?: (options?: {
@@ -32,25 +35,42 @@ type DirectoryPickerWindow = Window & {
 
 let root: WorkspaceDirectory | null = null
 let info: WorkspaceFile | null = null
-let handle: WritableDirectoryHandle | null = null
+let handle: StoredDirectoryHandle | null = null
 let snapshot: WorkspaceSnapshot = initialSnapshot()
 const listeners = new Set<() => void>()
+let handleStore: WorkspaceHandleStore<StoredDirectoryHandle> | null = null
+let restorePromise: Promise<void> | null = null
+
+function browserHandleStore(): WorkspaceHandleStore<StoredDirectoryHandle> {
+  if (!handleStore) {
+    handleStore =
+      typeof indexedDB === 'undefined'
+        ? createMemoryWorkspaceHandleStore<StoredDirectoryHandle>()
+        : createIndexedDbWorkspaceHandleStore<StoredDirectoryHandle>(indexedDB)
+  }
+  return handleStore
+}
+
+/** Tests replace the IndexedDB handle store. Logout does not clear it. */
+export function setWorkspaceHandleStore(
+  store: WorkspaceHandleStore<StoredDirectoryHandle> | null,
+): void {
+  handleStore = store
+  restorePromise = null
+}
 
 function initialSnapshot(): WorkspaceSnapshot {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || !canChooseWorkspace()) {
+    if (typeof window !== 'undefined' && !canChooseWorkspace()) {
+      return { status: 'unsupported', folderName: null, workspaceId: null, error: null }
+    }
     return { status: 'none', folderName: null, workspaceId: null, error: null }
-  }
-  if (!canChooseWorkspace()) {
-    return { status: 'unsupported', folderName: null, workspaceId: null, error: null }
   }
   const pointer = readWorkspacePointer(window.localStorage)
-  if (!pointer) {
-    return { status: 'none', folderName: null, workspaceId: null, error: null }
-  }
   return {
-    status: 'needs-permission',
-    folderName: pointer.name,
-    workspaceId: pointer.id,
+    status: 'restoring',
+    folderName: pointer?.name ?? null,
+    workspaceId: pointer?.id ?? null,
     error: null,
   }
 }
@@ -97,20 +117,21 @@ export async function connectWorkspace(directory: WorkspaceDirectory): Promise<W
 }
 
 /**
- * User gesture. Replaces the connected folder in memory only.
+ * User gesture. Replaces the connected folder in memory and the saved handle.
  * The previous folder on disk is left as it is.
  */
 export async function chooseWorkspace(): Promise<boolean> {
+  await ensureWorkspaceRestored()
   if (!canChooseWorkspace()) {
     publish({ ...snapshot, status: 'unsupported', error: null })
     return false
   }
-  let picked: WritableDirectoryHandle
+  let picked: FileSystemDirectoryHandle
   try {
-    picked = (await (window as DirectoryPickerWindow).showDirectoryPicker!({
+    picked = await (window as DirectoryPickerWindow).showDirectoryPicker!({
       id: PICKER_ID,
       mode: 'readwrite',
-    })) as WritableDirectoryHandle
+    })
   } catch (error) {
     if (isAbortError(error)) return false
     publish({
@@ -119,16 +140,71 @@ export async function chooseWorkspace(): Promise<boolean> {
     })
     return false
   }
-  return adoptHandle(picked)
+  const stored = picked as unknown as StoredDirectoryHandle
+  const granted = await requestWritePermission(stored)
+  if (!granted) {
+    publish({
+      ...snapshot,
+      status: 'needs-permission',
+      folderName: picked.name,
+      error: 'Framebase needs permission to use this folder.',
+    })
+    return false
+  }
+  try {
+    handle = stored
+    await connectWorkspace(directoryFromHandle(picked))
+    await browserHandleStore().write(stored)
+    return true
+  } catch (error) {
+    return failHandle(error)
+  }
 }
 
-/** Re-grants access to the folder chosen earlier in this session, or opens the picker. */
+/** Re-grants access from a user click. Does not run on refresh. */
 export async function reconnectWorkspace(): Promise<boolean> {
-  if (handle) {
-    const permission = await requestWritePermission(handle)
-    if (permission) return adoptHandle(handle)
+  await ensureWorkspaceRestored()
+  const saved = handle ?? (await browserHandleStore().read())
+  if (saved) {
+    const granted = await requestWritePermission(saved)
+    if (!granted) {
+      publish({
+        ...snapshot,
+        status: 'needs-permission',
+        folderName: saved.name,
+        error: 'Framebase needs permission to use this folder.',
+      })
+      return false
+    }
+    try {
+      const directory = directoryFromHandle(saved as unknown as FileSystemDirectoryHandle)
+      await openExistingWorkspace(directory)
+      handle = saved
+      await connectWorkspace(directory)
+      await browserHandleStore().write(saved)
+      return true
+    } catch (error) {
+      return failHandle(error)
+    }
   }
   return chooseWorkspace()
+}
+
+/**
+ * Reads the saved handle and reconnects when permission is already granted.
+ * Does not open the directory picker and does not call requestPermission.
+ */
+export function ensureWorkspaceRestored(): Promise<void> {
+  if (!restorePromise) {
+    restorePromise = restorePersistedWorkspace().catch(() => {
+      publish({
+        ...snapshot,
+        status: snapshot.folderName ? 'needs-permission' : 'none',
+        error: 'Could not restore the workspace folder.',
+      })
+    })
+  }
+  return restorePromise
 }
 
 export async function mirrorCurrentProject(document: ProjectDocument): Promise<void> {
@@ -141,7 +217,7 @@ export async function removeWorkspaceProject(projectId: string): Promise<void> {
   await removeProjectDirectory(root, projectId)
 }
 
-/** Drops the in-memory handle. Used when permission is gone and by tests. */
+/** Drops the in-memory connection. The saved directory handle stays. */
 export function releaseWorkspaceConnection(): void {
   root = null
   handle = null
@@ -156,40 +232,68 @@ export function releaseWorkspaceConnection(): void {
   })
 }
 
-async function adoptHandle(next: WritableDirectoryHandle): Promise<boolean> {
-  const granted = await requestWritePermission(next)
-  if (!granted) {
+async function restorePersistedWorkspace(): Promise<void> {
+  if (typeof window === 'undefined' || !canChooseWorkspace()) {
+    if (snapshot.status === 'restoring') {
+      publish({ status: 'none', folderName: null, workspaceId: null, error: null })
+    }
+    return
+  }
+  const result = await restoreStoredWorkspace({
+    readHandle: () => browserHandleStore().read(),
+    openDirectory: async (saved) =>
+      directoryFromHandle(saved as unknown as FileSystemDirectoryHandle),
+  })
+  if (result.status === 'none') {
+    publish({ status: 'none', folderName: null, workspaceId: null, error: null })
+    return
+  }
+  if (result.status === 'needs-permission') {
+    handle = result.handle
     publish({
-      ...snapshot,
       status: 'needs-permission',
-      folderName: next.name,
-      error: 'Framebase needs permission to use this folder.',
+      folderName: result.handle.name,
+      workspaceId: snapshot.workspaceId,
+      error: null,
     })
-    return false
+    return
   }
-  try {
-    handle = next
-    await connectWorkspace(directoryFromHandle(next))
-    return true
-  } catch (error) {
-    handle = null
-    bindWorkspaceStores(null, null)
-    root = null
-    const message =
-      error instanceof WorkspaceFormatError
-        ? error.message
-        : error instanceof Error
-          ? error.message
-          : 'Could not use that folder as a workspace.'
-    publish({ ...snapshot, error: message })
-    return false
+  if (result.status === 'invalid') {
+    handle = result.handle
+    publish({
+      status: 'needs-permission',
+      folderName: result.handle.name,
+      workspaceId: null,
+      error: result.message,
+    })
+    return
   }
+  handle = result.handle
+  await connectWorkspace(result.directory)
 }
 
-async function requestWritePermission(next: WritableDirectoryHandle): Promise<boolean> {
+async function requestWritePermission(next: StoredDirectoryHandle): Promise<boolean> {
   const mode = { mode: 'readwrite' as const }
   if ((await next.queryPermission(mode)) === 'granted') return true
   return (await next.requestPermission(mode)) === 'granted'
+}
+
+function failHandle(error: unknown): boolean {
+  handle = null
+  bindWorkspaceStores(null, null)
+  root = null
+  const message =
+    error instanceof WorkspaceFormatError
+      ? error.message
+      : error instanceof Error
+        ? error.message
+        : 'Could not use that folder as a workspace.'
+  publish({
+    ...snapshot,
+    status: 'needs-permission',
+    error: message,
+  })
+  return false
 }
 
 function remember(opened: WorkspaceFile): void {
@@ -208,9 +312,13 @@ function isAbortError(error: unknown): boolean {
 
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return
+    if (document.visibilityState !== 'visible' || !handle) return
     void refreshPermission()
   })
+}
+
+if (typeof window !== 'undefined' && canChooseWorkspace()) {
+  void ensureWorkspaceRestored()
 }
 
 async function refreshPermission(): Promise<void> {

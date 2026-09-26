@@ -21,21 +21,34 @@ export class WorkspaceFormatError extends Error {
 
 /**
  * Opens a valid Framebase folder, or creates the workspace files inside an
- * unrelated folder without deleting anything already there.
+ * unrelated folder the user just chose. Existing files in that folder stay.
  */
+export async function openExistingWorkspace(
+  root: WorkspaceDirectory,
+): Promise<WorkspaceFile> {
+  const existing = await readJson(root, WORKSPACE_FILE)
+  if (existing == null) {
+    throw new WorkspaceFormatError(
+      'This folder is not a Framebase workspace. Choose the workspace folder again. Nothing was deleted.',
+    )
+  }
+  const parsed = parseWorkspaceFile(existing)
+  if (parsed.name !== root.name) {
+    const next = { ...parsed, name: root.name }
+    await writeJson(root, WORKSPACE_FILE, next)
+    await ensureWorkspaceDirectories(root)
+    return next
+  }
+  await ensureWorkspaceDirectories(root)
+  return parsed
+}
+
 export async function openOrCreateWorkspace(
   root: WorkspaceDirectory,
 ): Promise<WorkspaceFile> {
   const existing = await readJson(root, WORKSPACE_FILE)
   if (existing != null) {
-    const parsed = parseWorkspaceFile(existing)
-    if (parsed.name !== root.name) {
-      const next = { ...parsed, name: root.name }
-      await writeJson(root, WORKSPACE_FILE, next)
-      return next
-    }
-    await ensureWorkspaceDirectories(root)
-    return parsed
+    return openExistingWorkspace(root)
   }
   const created: WorkspaceFile = {
     version: WORKSPACE_VERSION,

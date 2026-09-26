@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { googleCallbackUrl, oauthCallbackMessage, safeAuthRedirect } from './redirect'
+import { googleCallbackUrl, oauthCallbackMessage, safeAuthRedirect, authRedirectLocation } from './redirect'
+import { isShareToken, shareJoinPath } from '@/features/projects/share-access'
 
 const projectId = '22222222-2222-4222-8222-222222222222'
+const token = 'ab'.repeat(32)
 
 describe('safeAuthRedirect', () => {
   it('defaults empty and external targets to /projects', () => {
@@ -11,12 +13,19 @@ describe('safeAuthRedirect', () => {
     expect(safeAuthRedirect('//evil.example')).toBe('/projects')
     expect(safeAuthRedirect('/login')).toBe('/projects')
     expect(safeAuthRedirect(`/editor/${projectId}/extra`)).toBe('/projects')
+    expect(safeAuthRedirect(`/join/${projectId}`)).toBe('/projects')
   })
 
-  it('keeps a project page and an editor id', () => {
+  it('keeps a project page, an editor id, and a share token', () => {
     expect(safeAuthRedirect('/projects')).toBe('/projects')
     expect(safeAuthRedirect(`/editor/${projectId}`)).toBe(`/editor/${projectId}`)
     expect(safeAuthRedirect(`/editor/${projectId}?x=1`)).toBe(`/editor/${projectId}`)
+    expect(isShareToken(token)).toBe(true)
+    expect(safeAuthRedirect(shareJoinPath(token))).toBe(`/join/${token}`)
+    expect(authRedirectLocation(shareJoinPath(token))).toEqual({
+      to: '/join/$token',
+      params: { token },
+    })
   })
 })
 

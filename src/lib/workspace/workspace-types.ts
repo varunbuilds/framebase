@@ -4,20 +4,23 @@ import type { MediaByteStore } from '@/lib/media/media-byte-store'
 /**
  * Storage ownership:
  *
- * Supabase holds auth, project identity, and the ProjectDocument. That document
- * is the shared project state. It never includes files, blobs, object URLs,
- * directory handles, absolute paths, or caches.
+ * Supabase holds auth, project identity, membership, and the ProjectDocument.
+ * That document is the shared project state. It never includes files, blobs,
+ * object URLs, directory handles, absolute paths, or caches.
  *
- * The workspace is a folder the user picks on this device. It holds local
- * source media, a local project mirror, and rebuildable caches. A mediaSourceId
- * in the document is a shared reference. It does not mean this device has the
- * bytes. Another collaborator can open the same project with the media missing.
+ * IndexedDB on this device remembers only the FileSystemDirectoryHandle for
+ * the chosen workspace folder. It does not hold media bytes, the project
+ * document, caches, credentials, or a filesystem path.
+ *
+ * The workspace folder itself holds local source media, a local project
+ * mirror, and rebuildable caches. A mediaSourceId in the document is a shared
+ * reference. It does not mean this device has the bytes.
  *
  * Runtime state (File, Blob, object URL, media elements, decoded frames,
  * playback, UI) stays in memory.
  *
- * Future cloud media will fill a missing local source. Future collaboration
- * will sync operations, not media bytes or caches.
+ * Future collaboration syncs edits, presence, and timeline state. It does not
+ * sync source media or caches. Those stay in Supabase Storage and this folder.
  */
 
 export const WORKSPACE_VERSION = 1 as const
@@ -52,7 +55,7 @@ export interface WorkspaceDirectory {
 }
 
 export type WorkspaceSnapshot = {
-  status: 'unsupported' | 'none' | 'ready' | 'needs-permission'
+  status: 'unsupported' | 'none' | 'restoring' | 'ready' | 'needs-permission'
   /** Folder name only, such as "Framebase". Never an absolute path. */
   folderName: string | null
   workspaceId: string | null

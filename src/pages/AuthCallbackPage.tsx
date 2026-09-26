@@ -2,8 +2,7 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { AuthScreen } from '@/components/auth/AuthScreen'
 import { useAuth } from '@/features/auth/use-auth'
-import { oauthCallbackMessage, safeAuthRedirect } from '@/features/auth/redirect'
-import { isProjectId } from '@/features/projects/document'
+import { authRedirectLocation, oauthCallbackMessage } from '@/features/auth/redirect'
 
 export function AuthCallbackPage() {
   const { error, error_description, redirect } = useSearch({
@@ -17,19 +16,7 @@ export function AuthCallbackPage() {
   useEffect(() => {
     if (failure || !sessionReady) return
 
-    const destination = safeAuthRedirect(redirect)
-    if (destination.startsWith('/editor/')) {
-      const projectId = destination.slice('/editor/'.length)
-      if (isProjectId(projectId)) {
-        void navigate({
-          to: '/editor/$projectId',
-          params: { projectId },
-          replace: true,
-        })
-        return
-      }
-    }
-    void navigate({ to: '/projects', replace: true })
+    void navigate({ ...authRedirectLocation(redirect), replace: true })
   }, [failure, navigate, redirect, sessionReady])
 
   return (

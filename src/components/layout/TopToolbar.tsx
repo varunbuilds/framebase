@@ -1,9 +1,12 @@
-import { Link } from '@tanstack/react-router'
+import { Link, getRouteApi } from '@tanstack/react-router'
 import {
   Circle,
   Download,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { ShareProjectDialog } from '@/components/projects/ShareProjectDialog'
+import { useAuth } from '@/features/auth/use-auth'
+import { projectAccessRole } from '@/features/projects/share-access'
 import {
   isProjectSaveShortcut,
   projectSaveShortcutLabel,
@@ -11,7 +14,11 @@ import {
 import { useEditorHistory, useEditorStore } from '@/stores/editor-store'
 import { stepPlayheadMs } from '@/utils/time'
 
+const editorRoute = getRouteApi('/authenticated/editor/$projectId')
+
 export function TopToolbar() {
+  const project = editorRoute.useLoaderData()
+  const { user } = useAuth()
   const projectName = useEditorStore((state) => state.document.name)
   const setProjectName = useEditorStore((state) => state.setProjectName)
   const saveStatus = useEditorStore((state) => state.ui.saveStatus)
@@ -25,6 +32,8 @@ export function TopToolbar() {
   const [editingName, setEditingName] = useState(false)
   const [draftName, setDraftName] = useState(projectName)
   const inputRef = useRef<HTMLInputElement>(null)
+  const [shareOpen, setShareOpen] = useState(false)
+  const canShare = projectAccessRole(project.ownerId, user?.id) === 'owner'
 
   useEffect(() => {
     if (editingName) {
@@ -215,6 +224,15 @@ export function TopToolbar() {
         >
           Save
         </button>
+        {canShare && (
+          <button
+            type="button"
+            onClick={() => setShareOpen(true)}
+            className="h-7 rounded-md border border-fb-border bg-white/[0.06] px-2.5 text-[12px] font-medium text-fb-text hover:bg-white/[0.1]"
+          >
+            Share
+          </button>
+        )}
         <button
           type="button"
           disabled
@@ -227,6 +245,9 @@ export function TopToolbar() {
           <span className="text-[10px] uppercase tracking-wide">Soon</span>
         </button>
       </div>
+      {shareOpen && (
+        <ShareProjectDialog projectId={project.id} onClose={() => setShareOpen(false)} />
+      )}
     </header>
   )
 }

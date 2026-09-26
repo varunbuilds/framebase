@@ -7,6 +7,7 @@ import {
   redirect,
 } from '@tanstack/react-router'
 import { isSupabaseConfigured } from '@/lib/supabase/client'
+import { authRedirectLocation } from '@/features/auth/redirect'
 import { readAuthSession } from '@/features/auth/session'
 import { ProjectNotFoundError, fetchProject, listProjects } from '@/features/projects/repository'
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
@@ -15,6 +16,7 @@ import { LoginPage } from '@/pages/LoginPage'
 import { SignupPage } from '@/pages/SignupPage'
 import { ProjectsPage } from '@/pages/ProjectsPage'
 import { EditorLoadError, EditorNotFound, EditorPage } from '@/pages/EditorPage'
+import { JoinPage } from '@/pages/JoinPage'
 import { RouteError, SessionLoading } from '@/pages/RouteStates'
 
 const rootRoute = createRootRoute({
@@ -34,9 +36,9 @@ const loginRoute = createRoute({
   validateSearch: (search: Record<string, unknown>) => ({
     redirect: typeof search.redirect === 'string' ? search.redirect : '',
   }),
-  beforeLoad: async () => {
+  beforeLoad: async ({ search }) => {
     const session = await readAuthSession()
-    if (session) throw redirect({ to: '/projects' })
+    if (session) throw redirect(authRedirectLocation(search.redirect))
   },
   component: LoginPage,
 })
@@ -57,9 +59,12 @@ const authCallbackRoute = createRoute({
 const signupRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/signup',
-  beforeLoad: async () => {
+  validateSearch: (search: Record<string, unknown>) => ({
+    redirect: typeof search.redirect === 'string' ? search.redirect : '',
+  }),
+  beforeLoad: async ({ search }) => {
     const session = await readAuthSession()
-    if (session) throw redirect({ to: '/projects' })
+    if (session) throw redirect(authRedirectLocation(search.redirect))
   },
   component: SignupPage,
 })
@@ -110,11 +115,18 @@ const editorRoute = createRoute({
   errorComponent: ({ error }) => <EditorLoadError error={error} />,
 })
 
+const joinRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/join/$token',
+  component: JoinPage,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
   signupRoute,
   authCallbackRoute,
+  joinRoute,
   authenticatedRoute.addChildren([projectsRoute, editorRoute]),
 ])
 

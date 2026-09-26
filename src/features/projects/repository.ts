@@ -18,6 +18,7 @@ export type ProjectSummary = {
   id: string
   name: string
   updatedAt: string
+  ownerId: string
 }
 
 export type StoredProject = ProjectSummary & {
@@ -28,6 +29,7 @@ type ProjectSummaryRow = {
   id: string
   name: string
   updated_at: string
+  owner_id: string
 }
 
 type ProjectRow = ProjectSummaryRow & {
@@ -37,7 +39,7 @@ type ProjectRow = ProjectSummaryRow & {
 export async function listProjects(): Promise<ProjectSummary[]> {
   const { data, error } = await getSupabase()
     .from('projects')
-    .select('id, name, updated_at')
+    .select('id, name, updated_at, owner_id')
     .order('updated_at', { ascending: false })
 
   if (error) throw error
@@ -45,6 +47,7 @@ export async function listProjects(): Promise<ProjectSummary[]> {
     id: row.id,
     name: row.name,
     updatedAt: row.updated_at,
+    ownerId: row.owner_id,
   }))
 }
 
@@ -60,7 +63,7 @@ export async function createProject(
   const { data, error } = await getSupabase()
     .from('projects')
     .insert(record.row)
-    .select('id, name, updated_at, document')
+    .select('id, name, owner_id, updated_at, document')
     .single()
 
   if (error) throw error
@@ -69,6 +72,7 @@ export async function createProject(
     id: row.id,
     name: row.name,
     updatedAt: row.updated_at,
+    ownerId: row.owner_id,
     document: readStoredProject(row.document, row.id),
   }
 }
@@ -76,7 +80,7 @@ export async function createProject(
 export async function fetchProject(projectId: string): Promise<StoredProject> {
   const { data, error } = await getSupabase()
     .from('projects')
-    .select('id, name, updated_at, document')
+    .select('id, name, owner_id, updated_at, document')
     .eq('id', projectId)
     .maybeSingle()
 
@@ -87,6 +91,7 @@ export async function fetchProject(projectId: string): Promise<StoredProject> {
     id: row.id,
     name: row.name,
     updatedAt: row.updated_at,
+    ownerId: row.owner_id,
     document: readStoredProject(row.document, row.id),
   }
 }

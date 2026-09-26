@@ -7,7 +7,7 @@ import {
 } from '@/components/auth/AuthScreen'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { useAuth } from '@/features/auth/use-auth'
-import { isProjectId } from '@/features/projects/document'
+import { authRedirectLocation } from '@/features/auth/redirect'
 
 export function LoginPage() {
   const { signIn, status } = useAuth()
@@ -24,14 +24,7 @@ export function LoginPage() {
     setPending(true)
     try {
       await signIn(email.trim(), password)
-      const projectId = redirect.startsWith('/editor/')
-        ? redirect.slice('/editor/'.length)
-        : ''
-      if (isProjectId(projectId)) {
-        await navigate({ to: '/editor/$projectId', params: { projectId } })
-        return
-      }
-      await navigate({ to: '/projects' })
+      await navigate(authRedirectLocation(redirect))
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not sign in.')
     } finally {
@@ -45,7 +38,7 @@ export function LoginPage() {
       footer={
         <>
           No account?{' '}
-          <Link to="/signup" className="text-fb-text">
+          <Link to="/signup" search={{ redirect }} className="text-fb-text">
             Create one
           </Link>
         </>

@@ -33,6 +33,7 @@ export function LandingPage() {
               </Link>
               <Link
                 to="/signup"
+                search={{ redirect: '' }}
                 className="h-8 rounded-md bg-white px-3 text-[13px] font-medium leading-8 text-black no-underline"
               >
                 Create account

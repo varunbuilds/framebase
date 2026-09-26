@@ -52,15 +52,29 @@ export function WorkspaceBar() {
           >
             {pending ? 'Opening…' : 'Change'}
           </button>
+        ) : workspace.status === 'restoring' ? (
+          <p className="text-[12px] text-fb-muted">Opening workspace…</p>
         ) : workspace.status === 'needs-permission' ? (
-          <button
-            type="button"
-            onClick={() => void reconnect()}
-            disabled={pending}
-            className="h-8 rounded-md bg-white px-3 text-[12px] font-medium text-black disabled:opacity-50"
-          >
-            {pending ? 'Opening…' : 'Reconnect workspace'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void reconnect()}
+              disabled={pending}
+              className="h-8 rounded-md bg-white px-3 text-[12px] font-medium text-black disabled:opacity-50"
+            >
+              {pending ? 'Opening…' : 'Reconnect workspace'}
+            </button>
+            {workspace.error ? (
+              <button
+                type="button"
+                onClick={() => void choose()}
+                disabled={pending}
+                className="h-8 rounded-md border border-fb-border px-3 text-[12px] text-fb-text hover:bg-white/[0.06] disabled:opacity-50"
+              >
+                Choose folder
+              </button>
+            ) : null}
+          </div>
         ) : workspace.status === 'none' ? (
           <button
             type="button"

@@ -1,6 +1,7 @@
 import { isProjectId } from '@/features/projects/document'
+import { isShareToken } from '@/features/projects/share-access'
 
-/** Only in-app project routes. Anything else, including other origins, becomes /projects. */
+/** Only in-app project and share routes. Anything else becomes /projects. */
 export function safeAuthRedirect(value: string | null | undefined): string {
   if (!value || !value.startsWith('/') || value.startsWith('//')) return '/projects'
   if (value.includes('\\') || value.includes('://')) return '/projects'
@@ -15,7 +16,29 @@ export function safeAuthRedirect(value: string | null | undefined): string {
     }
   }
 
+  if (path.startsWith('/join/')) {
+    const token = path.slice('/join/'.length)
+    if (isShareToken(token) && path === `/join/${token}`) return path
+  }
+
   return '/projects'
+}
+
+export function authRedirectLocation(value: string | null | undefined):
+  | { to: '/projects' }
+  | { to: '/editor/$projectId'; params: { projectId: string } }
+  | { to: '/join/$token'; params: { token: string } } {
+  const path = safeAuthRedirect(value)
+  if (path.startsWith('/editor/')) {
+    return {
+      to: '/editor/$projectId' as const,
+      params: { projectId: path.slice('/editor/'.length) },
+    }
+  }
+  if (path.startsWith('/join/')) {
+    return { to: '/join/$token' as const, params: { token: path.slice('/join/'.length) } }
+  }
+  return { to: '/projects' as const }
 }
 
 export function googleCallbackUrl(origin: string, next?: string | null): string {

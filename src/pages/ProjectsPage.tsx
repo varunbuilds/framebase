@@ -163,7 +163,7 @@ export function ProjectsPage() {
                   >
                     Open
                   </Link>
-                  {confirmingId === project.id ? (
+                  {user?.id === project.ownerId && confirmingId === project.id ? (
                     <>
                       <button
                         type="button"
@@ -181,7 +181,7 @@ export function ProjectsPage() {
                         Cancel
                       </button>
                     </>
-                  ) : (
+                  ) : user?.id === project.ownerId ? (
                     <button
                       type="button"
                       onClick={() => setConfirmingId(project.id)}
@@ -189,7 +189,7 @@ export function ProjectsPage() {
                     >
                       Delete
                     </button>
-                  )}
+                  ) : null}
                 </div>
               </li>
             ))}
