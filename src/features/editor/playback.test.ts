@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   advanceThroughGap,
   getPlaybackEndMs,
+  nextPlayheadWhilePlaying,
   resolveActiveVideoClip,
   resolvePlaybackAt,
   resolvePlaybackTrack,
@@ -267,6 +268,52 @@ describe('advanceThroughGap', () => {
     const step = advanceThroughGap(doc, 1900, 200)
     expect(step.timelineTimeMs).toBe(2100)
     expect(step.reachedClipOrEnd).toBe(true)
+  })
+})
+
+describe('nextPlayheadWhilePlaying', () => {
+  it('keeps a media time that has already crossed a cut', () => {
+    expect(
+      nextPlayheadWhilePlaying({
+        playheadMs: 4980,
+        deltaMs: 16,
+        mediaTimelineMs: 5060,
+        playbackEndMs: 10_000,
+      }),
+    ).toBe(5060)
+  })
+
+  it('does not snap back when the media clock jumps to the cut', () => {
+    expect(
+      nextPlayheadWhilePlaying({
+        playheadMs: 5120,
+        deltaMs: 16,
+        mediaTimelineMs: 5000,
+        playbackEndMs: 10_000,
+      }),
+    ).toBe(5136)
+  })
+
+  it('follows the media clock while it stays with the playhead', () => {
+    expect(
+      nextPlayheadWhilePlaying({
+        playheadMs: 2000,
+        deltaMs: 16,
+        mediaTimelineMs: 2030,
+        playbackEndMs: 10_000,
+      }),
+    ).toBe(2030)
+  })
+
+  it('advances on the clock when media time is not ready', () => {
+    expect(
+      nextPlayheadWhilePlaying({
+        playheadMs: 5000,
+        deltaMs: 16,
+        mediaTimelineMs: null,
+        playbackEndMs: 10_000,
+      }),
+    ).toBe(5016)
   })
 })
 

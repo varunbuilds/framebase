@@ -1,6 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import {
   getPlaybackEndMs,
+  nextPlayheadWhilePlaying,
   resolvePlaybackAt,
   sourceToTimelineTimeMs,
   timelineToSourceTimeMs,
@@ -27,6 +28,7 @@ export function useTimelinePlayback(
 
   const attachedMediaIdRef = useRef<string | null>(null)
   const attachedClipIdRef = useRef<string | null>(null)
+  const pendingSeekSecRef = useRef<number | null>(null)
   const rafRef = useRef<number | null>(null)
   const lastFrameTsRef = useRef<number | null>(null)
   const playheadRef = useRef(useEditorStore.getState().ui.playheadMs)
@@ -129,11 +131,34 @@ export function useTimelinePlayback(
     const media = mediaRef.current
     media?.addEventListener('error', onMediaError)
 
+    const requestSeek = (mediaEl: HTMLMediaElement, targetSec: number) => {
+      if (Math.abs(mediaEl.currentTime - targetSec) <= SEEK_EPSILON_SEC) {
+        pendingSeekSecRef.current = null
+        return false
+      }
+      pendingSeekSecRef.current = targetSec
+      mediaEl.currentTime = targetSec
+      return true
+    }
+
+    const mediaTimeIsReady = (mediaEl: HTMLMediaElement) => {
+      const pending = pendingSeekSecRef.current
+      if (pending == null) return mediaEl.readyState >= 1
+      if (
+        mediaEl.readyState >= 1 &&
+        Math.abs(mediaEl.currentTime - pending) <= SEEK_EPSILON_SEC
+      ) {
+        pendingSeekSecRef.current = null
+        return true
+      }
+      return false
+    }
+
     const ensureClipMedia = (
       clipId: string,
       mediaSourceId: string,
       sourceTimeMs: number,
-    ): { element: HTMLMediaElement; rebound: boolean } | null => {
+    ): { element: HTMLMediaElement; holdClock: boolean } | null => {
       const mediaEl = mediaRef.current
       if (!mediaEl) return null
 
@@ -146,10 +171,19 @@ export function useTimelinePlayback(
       if (!sameSource) {
         attachedMediaIdRef.current = mediaSourceId
         attachedClipIdRef.current = clipId
+        pendingSeekSecRef.current = msToSeconds(sourceTimeMs)
         mediaEl.src = objectUrl
         mediaEl.load()
         const onReady = () => {
-          mediaEl.currentTime = msToSeconds(sourceTimeMs)
+          const live = resolvePlaybackAt(
+            documentRef.current,
+            playheadRef.current,
+          )
+          const targetSec =
+            live.status === 'clip'
+              ? msToSeconds(live.sourceTimeMs)
+              : msToSeconds(sourceTimeMs)
+          requestSeek(mediaEl, targetSec)
           if (isPlayingRef.current) {
             void mediaEl.play().catch(() => {
               setPlaybackError('Browser blocked or failed media playback.')
@@ -157,18 +191,29 @@ export function useTimelinePlayback(
           }
         }
         mediaEl.addEventListener('loadedmetadata', onReady, { once: true })
-        return { element: mediaEl, rebound: true }
+        return { element: mediaEl, holdClock: true }
       }
 
       if (!sameClip) {
         attachedClipIdRef.current = clipId
-        if (mediaEl.readyState >= 1) {
-          mediaEl.currentTime = msToSeconds(sourceTimeMs)
+        if (mediaEl.readyState < 1) {
+          return { element: mediaEl, holdClock: true }
         }
-        return { element: mediaEl, rebound: true }
+        const targetSec = msToSeconds(sourceTimeMs)
+        // The media clock often lands slightly past a cut in the same file.
+        // Seeking back to the boundary is what makes the picture and playhead jump.
+        const aheadSec = mediaEl.currentTime - targetSec
+        if (aheadSec >= 0 && aheadSec <= SEEK_EPSILON_SEC * 2) {
+          pendingSeekSecRef.current = null
+          return { element: mediaEl, holdClock: false }
+        }
+        return {
+          element: mediaEl,
+          holdClock: requestSeek(mediaEl, targetSec),
+        }
       }
 
-      return { element: mediaEl, rebound: false }
+      return { element: mediaEl, holdClock: !mediaTimeIsReady(mediaEl) }
     }
 
     const tick = (timestamp: number) => {
@@ -196,6 +241,7 @@ export function useTimelinePlayback(
         playheadRef.current = timeMs
         // Force media re-sync on the newly adopted playhead.
         attachedMediaIdRef.current = null
+        pendingSeekSecRef.current = null
       }
       const resolution = resolvePlaybackAt(doc, timeMs)
 
@@ -211,6 +257,7 @@ export function useTimelinePlayback(
       }
 
       if (resolution.status === 'gap') {
+        pendingSeekSecRef.current = null
         const mediaEl = mediaRef.current
         if (mediaEl && !mediaEl.paused) mediaEl.pause()
 
@@ -243,43 +290,41 @@ export function useTimelinePlayback(
       }
 
       const mediaEl = bound.element
+      const clockHeld = bound.holdClock || !mediaTimeIsReady(mediaEl)
 
-      if (!bound.rebound && mediaEl.readyState >= 1) {
+      if (!clockHeld && mediaEl.readyState >= 1) {
         const expectedSource = timelineToSourceTimeMs(resolution.clip, timeMs)
-        const drift = Math.abs(mediaEl.currentTime - msToSeconds(expectedSource))
-        if (drift > SEEK_EPSILON_SEC * 2) {
-          mediaEl.currentTime = msToSeconds(resolution.sourceTimeMs)
+        const driftSec = mediaEl.currentTime - msToSeconds(expectedSource)
+        // Media ahead of the playhead is followed. Seeking it backward
+        // rewinds the picture to the cut.
+        if (driftSec < -(SEEK_EPSILON_SEC * 2)) {
+          requestSeek(mediaEl, msToSeconds(resolution.sourceTimeMs))
         }
       }
 
-      if (mediaEl.paused && mediaEl.readyState >= 2) {
+      if (mediaEl.paused && mediaEl.readyState >= 2 && pendingSeekSecRef.current == null) {
         void mediaEl.play().catch(() => {
           setPlaybackError('Browser blocked or failed media playback.')
         })
       }
 
-      if (
-        !bound.rebound &&
+      const mediaTimelineMs =
+        !clockHeld &&
+        pendingSeekSecRef.current == null &&
         !mediaEl.paused &&
         Number.isFinite(mediaEl.currentTime)
-      ) {
-        timeMs = Math.min(
-          endMs,
-          sourceToTimelineTimeMs(resolution.clip, secondsToMs(mediaEl.currentTime)),
-        )
-      } else if (deltaMs > 0) {
-        timeMs = Math.min(endMs, timeMs + deltaMs)
-      }
+          ? sourceToTimelineTimeMs(
+              resolution.clip,
+              secondsToMs(mediaEl.currentTime),
+            )
+          : null
 
-      const clipEnd =
-        resolution.clip.timelineStartMs +
-        (resolution.clip.sourceOutMs - resolution.clip.sourceInMs)
-
-      if (timeMs >= clipEnd) {
-        // Land exactly on the boundary so the next tick resolves the following clip or gap.
-        timeMs = clipEnd
-        if (!mediaEl.paused) mediaEl.pause()
-      }
+      timeMs = nextPlayheadWhilePlaying({
+        playheadMs: timeMs,
+        deltaMs,
+        mediaTimelineMs,
+        playbackEndMs: endMs,
+      })
 
       playheadRef.current = timeMs
       setPlayheadMs(timeMs)

@@ -294,6 +294,24 @@ export function advanceThroughGap(
   }
 }
 
+/**
+ * Playhead step while the timeline is playing.
+ * A media clock that jumps backward — typical when a cut seeks the element
+ * to the clip boundary — is ignored so the playhead does not snap back to the cut.
+ */
+export function nextPlayheadWhilePlaying(args: {
+  playheadMs: TimeMs
+  deltaMs: TimeMs
+  mediaTimelineMs: TimeMs | null
+  playbackEndMs: TimeMs
+}): TimeMs {
+  const stepped = args.playheadMs + Math.max(0, args.deltaMs)
+  const media = args.mediaTimelineMs
+  const trusted =
+    media != null && media + 2 >= args.playheadMs ? media : stepped
+  return Math.min(args.playbackEndMs, Math.max(args.playheadMs, trusted))
+}
+
 export function findNextClipStartMs(
   document: ProjectDocument,
   afterMs: TimeMs,
