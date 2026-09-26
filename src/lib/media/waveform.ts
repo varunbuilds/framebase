@@ -1,4 +1,14 @@
-/** Runtime waveform peak cache keyed by media source id. */
+/**
+ * Waveform peaks keyed by media source id.
+ * The in-memory envelope is rebuilt from OPFS when possible. Missing peaks are
+ * decoded from source media. Neither cache is part of ProjectDocument.
+ */
+import {
+  getDerivedCacheStore,
+  putDerivedCache,
+  readDerivedCache,
+  waveformCacheKey,
+} from './derived-cache'
 
 const peaksCache = new Map<string, Float32Array>()
 const inflight = new Map<string, Promise<Float32Array>>()
@@ -68,6 +78,35 @@ async function decodePeaks(objectUrl: string, peakCount: number): Promise<Float3
   }
 }
 
+export function encodeWaveformPeaks(peaks: Float32Array): Blob {
+  const bytes = peaks.buffer.slice(
+    peaks.byteOffset,
+    peaks.byteOffset + peaks.byteLength,
+  ) as ArrayBuffer
+  return new Blob([bytes], { type: 'application/octet-stream' })
+}
+
+export function decodeWaveformPeaks(buffer: ArrayBuffer): Float32Array | null {
+  if (buffer.byteLength === 0 || buffer.byteLength % 4 !== 0) return null
+  return new Float32Array(buffer.slice(0))
+}
+
+/** Read a persisted envelope. A miss or corrupt file returns null and can be regenerated. */
+export async function readCachedWaveform(
+  mediaSourceId: string,
+  peakCount: number,
+): Promise<Float32Array | null> {
+  const cacheKey = waveformCacheKey(peakCount)
+  const blob = await readDerivedCache(mediaSourceId, cacheKey)
+  if (!blob) return null
+  const peaks = decodeWaveformPeaks(await blob.arrayBuffer())
+  if (!peaks || peaks.length < peakCount) {
+    await getDerivedCacheStore().invalidate(mediaSourceId, cacheKey).catch(() => undefined)
+    return null
+  }
+  return peaks
+}
+
 export function getWaveformPeaks(
   mediaSourceId: string,
   objectUrl: string,
@@ -79,27 +118,59 @@ export function getWaveformPeaks(
     return Promise.resolve(cached)
   }
 
-  const existing = inflight.get(mediaSourceId)
+  const flightKey = `${mediaSourceId}:${peakCount}`
+  const existing = inflight.get(flightKey)
   if (existing) return existing
 
-  const promise = decodePeaks(objectUrl, peakCount)
-    .then((peaks) => {
-      peaksCache.set(mediaSourceId, peaks)
-      inflight.delete(mediaSourceId)
-      return peaks
-    })
-    .catch((error: unknown) => {
-      inflight.delete(mediaSourceId)
-      throw error
-    })
+  const promise = loadOrDecodePeaks(mediaSourceId, objectUrl, peakCount).finally(() => {
+    if (inflight.get(flightKey) === promise) inflight.delete(flightKey)
+  })
 
-  inflight.set(mediaSourceId, promise)
+  inflight.set(flightKey, promise)
   return promise
 }
 
-export function clearWaveformPeaks(mediaSourceId: string): void {
+async function loadOrDecodePeaks(
+  mediaSourceId: string,
+  objectUrl: string,
+  peakCount: number,
+): Promise<Float32Array> {
+  const stored = await readCachedWaveform(mediaSourceId, peakCount)
+  if (stored) {
+    rememberPeaks(mediaSourceId, stored)
+    return stored
+  }
+  const peaks = await decodePeaks(objectUrl, peakCount)
+  rememberPeaks(mediaSourceId, peaks)
+  void putDerivedCache(mediaSourceId, waveformCacheKey(peakCount), encodeWaveformPeaks(peaks))
+  return peaks
+}
+
+function rememberPeaks(mediaSourceId: string, peaks: Float32Array): void {
+  const current = peaksCache.get(mediaSourceId)
+  if (!current || peaks.length >= current.length) {
+    peaksCache.set(mediaSourceId, peaks)
+  }
+}
+
+/** Drop in-memory peaks. Pass no id to drop every source. Does not delete OPFS copies. */
+export function clearWaveformPeaks(mediaSourceId?: string): void {
+  if (!mediaSourceId) {
+    peaksCache.clear()
+    inflight.clear()
+    return
+  }
   peaksCache.delete(mediaSourceId)
-  inflight.delete(mediaSourceId)
+  const prefix = `${mediaSourceId}:`
+  for (const key of inflight.keys()) {
+    if (key.startsWith(prefix)) inflight.delete(key)
+  }
+}
+
+export function retainWaveformPeaks(keep: ReadonlySet<string>): void {
+  for (const mediaSourceId of peaksCache.keys()) {
+    if (!keep.has(mediaSourceId)) clearWaveformPeaks(mediaSourceId)
+  }
 }
 
 /**

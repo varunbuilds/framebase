@@ -6,6 +6,7 @@ import {
   hydrateDocumentMediaOnce,
 } from '@/lib/media/hydrate-project-media'
 import { revokeObjectUrlsExcept } from '@/lib/media/object-urls'
+import { retainRuntimeDerivedCaches } from '@/lib/media/runtime-caches'
 import { useProjectAutosave } from '@/features/projects/use-project-autosave'
 import { useEditorStore } from '@/stores/editor-store'
 const editorRoute = getRouteApi('/authenticated/editor/$projectId')
@@ -32,9 +33,9 @@ export function EditorPage() {
         active,
         hydrated: hydrated.document,
         load: (document) => {
-          revokeObjectUrlsExcept(
-            new Set(document.mediaSources.map((source) => source.id)),
-          )
+          const mediaIds = new Set(document.mediaSources.map((source) => source.id))
+          revokeObjectUrlsExcept(mediaIds)
+          retainRuntimeDerivedCaches(mediaIds)
           loadDocument(document, updatedAt)
         },
       })

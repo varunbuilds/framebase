@@ -7,6 +7,7 @@ import {
 } from './media-byte-store'
 import { createMemoryMediaStore } from './memory-media-store'
 
+/** Original imported bytes only. Filmstrips and waveforms live in framebase-cache. */
 const ROOT_DIRECTORY = 'framebase-media'
 const UNAVAILABLE =
   'This browser cannot store imported media on this device, so it would disappear after a refresh.'

@@ -21,10 +21,11 @@ import {
   touchDocument,
   unloadedProject,
 } from '@/features/editor/project'
-import { clearFilmstripFramesForObjectUrl } from '@/lib/media/filmstrip-cache'
+import { deleteStoredMedia } from '@/lib/media/delete-stored-media'
+import { clearFilmstripFrames } from '@/lib/media/filmstrip-cache'
 import { clearHydrationCache } from '@/lib/media/hydrate-project-media'
-import { deleteMedia } from '@/lib/media/opfs-media-store'
-import { getObjectUrl, revokeAllObjectUrls, revokeObjectUrl } from '@/lib/media/object-urls'
+import { revokeAllObjectUrls, revokeObjectUrl } from '@/lib/media/object-urls'
+import { clearRuntimeDerivedCaches } from '@/lib/media/runtime-caches'
 import { clearWaveformPeaks } from '@/lib/media/waveform'
 import type { ClipDragState, EditorUiState } from '@/types/editor'
 import type { MediaSource, ProjectDocument, TimeMs } from '@/types/timeline'
@@ -186,6 +187,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
    */
   endEditingSession: () => {
     clearHydrationCache()
+    clearRuntimeDerivedCaches()
     revokeAllObjectUrls()
     get().loadDocument(unloadedProject, null)
   },
@@ -398,8 +400,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
       temporal.resume()
       return false
     }
-    const objectUrl = getObjectUrl(mediaSourceId)
-    if (objectUrl) clearFilmstripFramesForObjectUrl(objectUrl)
+    clearFilmstripFrames(mediaSourceId)
     revokeObjectUrl(mediaSourceId)
     clearWaveformPeaks(mediaSourceId)
     const ui = get().ui
@@ -426,7 +427,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
         ...history.futureStates.map((state) => state.document),
       ].filter((document): document is ProjectDocument => document != null)
       if (!snapshots.some((document) => documentUsesOpfsKey(document, key))) {
-        void deleteMedia(key).catch(() => undefined)
+        void deleteStoredMedia(key).catch(() => undefined)
       }
     }
     return true

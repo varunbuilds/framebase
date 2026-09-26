@@ -27,9 +27,12 @@ import {
 } from '@/features/editor/project'
 import { useEditorHistory, useEditorStore } from '@/stores/editor-store'
 import {
+  FILMSTRIP_FRAME_HEIGHT,
+  FILMSTRIP_JPEG_QUALITY,
   getFilmstripFrame,
   hasFilmstripFrame,
-  setFilmstripFrame,
+  loadFilmstripFrame,
+  storeFilmstripFrame,
 } from '@/lib/media/filmstrip-cache'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { discardImportedMedia, importLocalMediaFile } from '@/lib/media/import'
@@ -171,11 +174,43 @@ function trackIdAtClientY(args: {
 
 const FILMSTRIP_HEIGHT = 70
 
+function filmstripTimeMs(slot: number, slotMs: number, durationMs: number): number {
+  return Math.min(durationMs - 1, Math.round(slot * slotMs + slotMs / 2))
+}
+
+function seekVideo(
+  video: HTMLVideoElement,
+  timeMs: number,
+  durationMs: number,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => resolve()
+    video.onseeked = finish
+    video.onerror = finish
+    const seconds = Math.min(
+      Math.max(0, (video.duration || durationMs / 1000) - 0.05),
+      timeMs / 1000,
+    )
+    if (Math.abs(video.currentTime - seconds) < 0.02) {
+      finish()
+      return
+    }
+    video.currentTime = seconds
+  })
+}
+
+function canvasToJpeg(canvas: HTMLCanvasElement): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', FILMSTRIP_JPEG_QUALITY)
+  })
+}
+
 /**
  * Premiere/Resolve-style strip: fixed-aspect thumbnails locked to source time.
  * Zoom shows more tiles; trimming slides the same tiles instead of stretching them.
  */
 function VideoFilmstrip({
+  mediaSourceId,
   src,
   sourceInMs,
   sourceOutMs,
@@ -183,6 +218,7 @@ function VideoFilmstrip({
   pixelsPerSecond,
   aspect,
 }: {
+  mediaSourceId: string
   src: string
   sourceInMs: number
   sourceOutMs: number
@@ -218,22 +254,41 @@ function VideoFilmstrip({
   useEffect(() => {
     const missing: number[] = []
     for (let slot = startSlot; slot <= endSlot; slot += 1) {
-      const timeMs = Math.min(durationMs - 1, Math.round(slot * slotMs + slotMs / 2))
-      if (!hasFilmstripFrame(src, timeMs)) missing.push(slot)
+      const timeMs = filmstripTimeMs(slot, slotMs, durationMs)
+      if (!hasFilmstripFrame(mediaSourceId, timeMs)) missing.push(timeMs)
     }
     if (missing.length === 0) return
 
     let cancelled = false
-    const video = document.createElement('video')
-    video.src = src
-    video.muted = true
-    video.preload = 'auto'
-    video.playsInline = true
-    video.crossOrigin = 'anonymous'
+    let video: HTMLVideoElement | null = null
+    const bump = () => {
+      if (!cancelled) setCacheVersion((version) => version + 1)
+    }
 
-    const capture = async () => {
+    const capture = async (times: number[]) => {
+      if (times.length === 0) return
+      video = document.createElement('video')
+      video.src = src
+      video.muted = true
+      video.preload = 'auto'
+      video.playsInline = true
+      video.crossOrigin = 'anonymous'
+      await new Promise<void>((resolve) => {
+        if (!video) {
+          resolve()
+          return
+        }
+        if (video.readyState >= 1) {
+          resolve()
+          return
+        }
+        video.onloadedmetadata = () => resolve()
+        video.onerror = () => resolve()
+      })
+      if (cancelled || !video) return
+
       const canvas = document.createElement('canvas')
-      const height = 180
+      const height = FILMSTRIP_FRAME_HEIGHT
       const width = Math.max(1, Math.round(height * safeAspect))
       canvas.width = width
       canvas.height = height
@@ -242,59 +297,45 @@ function VideoFilmstrip({
       context.imageSmoothingEnabled = true
       context.imageSmoothingQuality = 'high'
 
-      for (const slot of missing) {
-        if (cancelled) return
-        const timeMs = Math.min(
-          durationMs - 1,
-          Math.round(slot * slotMs + slotMs / 2),
-        )
-        if (hasFilmstripFrame(src, timeMs)) continue
-        await new Promise<void>((resolve) => {
-          const finish = () => resolve()
-          video.onseeked = finish
-          video.onerror = finish
-          const seconds = Math.min(
-            Math.max(0, (video.duration || durationMs / 1000) - 0.05),
-            timeMs / 1000,
-          )
-          if (Math.abs(video.currentTime - seconds) < 0.02) {
-            finish()
-            return
-          }
-          video.currentTime = seconds
-        })
-        if (cancelled || hasFilmstripFrame(src, timeMs)) continue
+      for (const timeMs of times) {
+        if (cancelled || !video) return
+        if (hasFilmstripFrame(mediaSourceId, timeMs)) continue
+        await seekVideo(video, timeMs, durationMs)
+        if (cancelled || hasFilmstripFrame(mediaSourceId, timeMs)) continue
         context.drawImage(video, 0, 0, width, height)
-        setFilmstripFrame(src, timeMs, canvas.toDataURL('image/jpeg', 0.86))
-        setCacheVersion((version) => version + 1)
+        const jpeg = await canvasToJpeg(canvas)
+        if (!jpeg || cancelled) continue
+        storeFilmstripFrame(mediaSourceId, timeMs, jpeg)
+        bump()
       }
     }
 
-    const start = () => void capture()
-    if (video.readyState >= 1) start()
-    else video.onloadedmetadata = start
-    video.onerror = () => {
-      if (!cancelled) setCacheVersion((version) => version + 1)
-    }
+    void (async () => {
+      const needCapture: number[] = []
+      for (const timeMs of missing) {
+        if (cancelled) return
+        if (await loadFilmstripFrame(mediaSourceId, timeMs)) bump()
+        else needCapture.push(timeMs)
+      }
+      if (!cancelled) await capture(needCapture)
+    })()
 
     return () => {
       cancelled = true
+      if (!video) return
       video.onloadedmetadata = null
       video.onseeked = null
       video.removeAttribute('src')
       video.load()
     }
-  }, [durationMs, endSlot, safeAspect, slotMs, src, startSlot])
+  }, [durationMs, endSlot, mediaSourceId, safeAspect, slotMs, src, startSlot])
 
   return (
     <div className="pointer-events-none h-full w-full overflow-clip" aria-hidden>
       <div className="flex h-full" style={{ marginLeft: -offsetPx }}>
         {slots.map((slot) => {
-          const timeMs = Math.min(
-            durationMs - 1,
-            Math.round(slot * slotMs + slotMs / 2),
-          )
-          const frame = getFilmstripFrame(src, timeMs)
+          const timeMs = filmstripTimeMs(slot, slotMs, durationMs)
+          const frame = getFilmstripFrame(mediaSourceId, timeMs)
           return (
             <div
               key={slot}
@@ -480,6 +521,7 @@ function TimelineClipBlock({
       >
         {isVideo && objectUrl && media ? (
           <VideoFilmstrip
+            mediaSourceId={media.id}
             src={objectUrl}
             sourceInMs={sourceInMs}
             sourceOutMs={sourceOutMs}

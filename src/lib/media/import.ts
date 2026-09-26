@@ -3,11 +3,8 @@ import type { MediaKind, MediaSource } from '@/types/timeline'
 import { createId } from '@/utils/id'
 import { secondsToMs } from '@/utils/time'
 import { MediaStoreUnavailableError } from './media-byte-store'
-import {
-  deleteMedia,
-  isPersistentMediaAvailable,
-  saveMedia,
-} from './opfs-media-store'
+import { deleteStoredMedia } from './delete-stored-media'
+import { isPersistentMediaAvailable, saveMedia } from './opfs-media-store'
 import { revokeObjectUrl, setObjectUrl } from './object-urls'
 
 export type ImportMediaResult =
@@ -171,7 +168,7 @@ export async function importLocalMediaFile(file: File): Promise<ImportMediaResul
 
     return { ok: true, source, objectUrl }
   } catch (error) {
-    await deleteMedia(id).catch(() => undefined)
+    await deleteStoredMedia(id).catch(() => undefined)
     const message =
       error instanceof MediaStoreUnavailableError
         ? error.message
@@ -186,7 +183,7 @@ export async function importLocalMediaFile(file: File): Promise<ImportMediaResul
 export async function discardImportedMedia(source: MediaSource): Promise<void> {
   revokeObjectUrl(source.id)
   if (source.locator.kind === 'opfs') {
-    await deleteMedia(source.locator.key).catch(() => undefined)
+    await deleteStoredMedia(source.locator.key).catch(() => undefined)
   }
 }
 
