@@ -4,6 +4,7 @@ import {
   addMediaToTimeline,
   canLinkClipSelection,
   canUnlinkClipSelection,
+  deleteClip,
   linkClips,
   planMediaDrop,
   splitClipAtTime,
@@ -269,5 +270,47 @@ describe('splitClipAtTime', () => {
     const split = splitClipAtTime(document, video.id, video.timelineStartMs)
     expect(split.ok).toBe(false)
     expect(document.clips).toHaveLength(2)
+  })
+})
+
+describe('deleteClip', () => {
+  it('removes every clip in the link group', () => {
+    let document = createEmptyProject('Test')
+    const added = addMediaSource(document, avSource('m1', 'one.mp4', 2000))
+    expect(added.ok).toBe(true)
+    if (!added.ok) return
+    document = added.document
+    const placed = addMediaToTimeline({ document, mediaSourceId: 'm1' })
+    expect(placed.ok).toBe(true)
+    if (!placed.ok) return
+    document = placed.document
+    expect(document.clips).toHaveLength(2)
+
+    const deleted = deleteClip(document, document.clips[0]!.id)
+    expect(deleted.ok).toBe(true)
+    if (!deleted.ok) return
+    expect(deleted.document.clips).toEqual([])
+  })
+
+  it('leaves an unlinked partner when only one clip is deleted', () => {
+    let document = createEmptyProject('Test')
+    const added = addMediaSource(document, avSource('m1', 'one.mp4', 2000))
+    expect(added.ok).toBe(true)
+    if (!added.ok) return
+    document = added.document
+    const placed = addMediaToTimeline({ document, mediaSourceId: 'm1' })
+    expect(placed.ok).toBe(true)
+    if (!placed.ok) return
+    document = placed.document
+    const unlinked = unlinkClips(document, document.clips.map((clip) => clip.id))
+    expect(unlinked.ok).toBe(true)
+    if (!unlinked.ok) return
+    document = unlinked.document
+
+    const deleted = deleteClip(document, document.clips[0]!.id)
+    expect(deleted.ok).toBe(true)
+    if (!deleted.ok) return
+    expect(deleted.document.clips).toHaveLength(1)
+    expect(deleted.document.clips[0]?.id).toBe(document.clips[1]!.id)
   })
 })

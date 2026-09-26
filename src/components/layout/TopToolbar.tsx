@@ -154,7 +154,7 @@ export function TopToolbar() {
             }
           }}
           aria-label="Project name"
-          className="h-7 min-w-[160px] rounded border border-fb-border-strong bg-white px-2 text-[13px] text-fb-text"
+          className="h-7 min-w-[160px] rounded border border-fb-border-strong bg-fb-app px-2 text-[13px] text-fb-text caret-fb-text scheme-dark"
         />
       ) : (
         <button

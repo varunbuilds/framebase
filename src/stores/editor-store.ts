@@ -454,7 +454,9 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
       document: commitDocument(get().document, result.document),
       ui: {
         ...ui,
-        selectedClipIds: ui.selectedClipIds.filter((id) => id !== clipId),
+        selectedClipIds: ui.selectedClipIds.filter((id) =>
+          result.document.clips.some((clip) => clip.id === id),
+        ),
         isPlaying: false,
         saveStatus: 'unsaved',
       },

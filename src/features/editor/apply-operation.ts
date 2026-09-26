@@ -259,18 +259,18 @@ function applyClipDelete(
   const clip = getClipById(document, clipId)
   if (!clip) return { ok: false, error: 'Clip not found.' }
 
-  let clips = document.clips
-  if (clip.linkGroupId) {
-    const groupId = clip.linkGroupId
-    clips = clips.map((item) =>
-      item.linkGroupId === groupId ? { ...item, linkGroupId: undefined } : item,
-    )
-  }
+  const removeIds = new Set(
+    clip.linkGroupId
+      ? document.clips
+          .filter((item) => item.linkGroupId === clip.linkGroupId)
+          .map((item) => item.id)
+      : [clipId],
+  )
   return {
     ok: true,
     document: withClips(
       document,
-      clips.filter((item) => item.id !== clipId),
+      document.clips.filter((item) => !removeIds.has(item.id)),
     ),
   }
 }
