@@ -1242,7 +1242,7 @@ export function TimelinePanel() {
 
     viewport.addEventListener('wheel', onWheel, { passive: false })
     return () => viewport.removeEventListener('wheel', onWheel)
-  }, [zoomAtClientX])
+  }, [session.structureReady, zoomAtClientX])
   const rulerMarks = useMemo(() => {
     const marks: Array<{ ms: number; major: boolean }> = []
     const stepMs =
@@ -1588,7 +1588,7 @@ export function TimelinePanel() {
     if (!viewport || restoredScrollRef.current) return
     viewport.scrollLeft = timelineScrollLeft
     restoredScrollRef.current = true
-  }, [timelineScrollLeft])
+  }, [timelineScrollLeft, session.structureReady])
 
   useEffect(() => {
     const viewport = bodyScrollRef.current
@@ -1599,7 +1599,7 @@ export function TimelinePanel() {
     resizeObserver.observe(viewport)
     setViewportWidth(Math.max(0, viewport.clientWidth - LABEL_WIDTH))
     return () => resizeObserver.disconnect()
-  }, [])
+  }, [session.structureReady])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

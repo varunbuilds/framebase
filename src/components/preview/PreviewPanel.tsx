@@ -253,6 +253,7 @@ export function PreviewPanel() {
             aria-valuetext={silent ? 'Muted' : `${Math.round(volume * 100)}%`}
             title="Volume"
             style={{ ['--volume-pct' as string]: `${volume * 100}%` }}
+            className="volume-slider"
             disabled={!session.interactive}
           />
         </div>

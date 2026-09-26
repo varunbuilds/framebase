@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { TopToolbar } from '@/components/layout/TopToolbar'
 import { MediaPanel } from '@/components/media/MediaPanel'
 import { PreviewPanel } from '@/components/preview/PreviewPanel'
-import { InspectorPanel } from '@/components/inspector/InspectorPanel'
 import { TimelinePanel } from '@/components/timeline/TimelinePanel'
 import { useWorkspace } from '@/lib/workspace/use-workspace'
 import { chooseWorkspace, reconnectWorkspace } from '@/lib/workspace/workspace-manager'
@@ -109,7 +108,6 @@ export function EditorShell() {
           </div>
           <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
             <PreviewPanel />
-            <InspectorPanel />
           </div>
         </div>
         <TimelinePanel />
