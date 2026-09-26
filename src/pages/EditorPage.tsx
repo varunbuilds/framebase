@@ -7,6 +7,8 @@ import {
 } from '@/lib/media/hydrate-project-media'
 import { revokeObjectUrlsExcept } from '@/lib/media/object-urls'
 import { retainRuntimeDerivedCaches } from '@/lib/media/runtime-caches'
+import { copyLegacyOpfsMediaIntoWorkspace } from '@/lib/workspace/workspace-migration'
+import { mirrorCurrentProject } from '@/lib/workspace/workspace-manager'
 import { useProjectAutosave } from '@/features/projects/use-project-autosave'
 import { useEditorStore } from '@/stores/editor-store'
 const editorRoute = getRouteApi('/authenticated/editor/$projectId')
@@ -39,7 +41,16 @@ export function EditorPage() {
           loadDocument(document, updatedAt)
         },
       })
-      if (committed) setOpenedKey(openKey)
+      if (committed) {
+        setOpenedKey(openKey)
+        const storedKeys = hydrated.document.mediaSources.flatMap((source) =>
+          source.locator.kind === 'opfs' || source.locator.kind === 'local'
+            ? [source.locator.key]
+            : [],
+        )
+        void copyLegacyOpfsMediaIntoWorkspace(storedKeys)
+        void mirrorCurrentProject(hydrated.document).catch(() => undefined)
+      }
     })
     return () => {
       active = false

@@ -1,6 +1,12 @@
 import { Film, Music2, Plus, Trash2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { discardImportedMedia, importLocalMediaFile, MEDIA_ACCEPT } from '@/lib/media/import'
+import {
+  chooseWorkspace,
+  isWorkspaceReady,
+  reconnectWorkspace,
+} from '@/lib/workspace/workspace-manager'
+import { useWorkspace } from '@/lib/workspace/use-workspace'
 import { beginMediaDrag, endMediaDrag } from '@/lib/media/media-drag'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { useEditorStore } from '@/stores/editor-store'
@@ -34,6 +40,7 @@ export function MediaPanel() {
   const addClip = useEditorStore((state) => state.addClip)
   const setImportError = useEditorStore((state) => state.setImportError)
   const setImportStatus = useEditorStore((state) => state.setImportStatus)
+  const workspace = useWorkspace()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef(new Map<string, HTMLLIElement>())
@@ -67,6 +74,20 @@ export function MediaPanel() {
   const applySelection = (next: string[]) => {
     if (sameSelection(next)) return
     selectMediaSource(next)
+  }
+
+  const beginImport = async () => {
+    if (!isWorkspaceReady()) {
+      const connected =
+        workspace.status === 'needs-permission'
+          ? await reconnectWorkspace()
+          : await chooseWorkspace()
+      if (!connected) {
+        setImportError('Choose a local workspace before importing media.')
+        return
+      }
+    }
+    fileInputRef.current?.click()
   }
 
   const handleFiles = async (files: FileList | null) => {
@@ -189,7 +210,7 @@ export function MediaPanel() {
         </h2>
         <button
           type="button"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => void beginImport()}
           disabled={importStatus === 'importing'}
           className="inline-flex h-7 items-center gap-1 rounded-md border border-white/10 bg-white/[0.07] px-2 text-[11px] font-medium text-fb-text hover:bg-white/[0.12] disabled:opacity-50"
         >

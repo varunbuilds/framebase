@@ -1,3 +1,5 @@
+import { createResolvingCacheStore } from '@/lib/workspace/resolving-store'
+import { boundWorkspaceCache } from '@/lib/workspace/store-binding'
 import { assertMediaSourceId } from './media-byte-store'
 import { isPersistentMediaAvailable } from './opfs-media-store'
 
@@ -91,7 +93,10 @@ let activeStore: DerivedCacheStore | null = null
 export function getDerivedCacheStore(): DerivedCacheStore {
   if (!activeStore) {
     activeStore = isPersistentMediaAvailable()
-      ? createOpfsDerivedCacheStore()
+      ? createResolvingCacheStore({
+          workspace: boundWorkspaceCache,
+          legacy: createOpfsDerivedCacheStore(),
+        })
       : createMemoryDerivedCacheStore()
   }
   return activeStore

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { projectContentEqual } from '@/features/editor/project'
 import { useEditorStore } from '@/stores/editor-store'
 import type { ProjectDocument } from '@/types/timeline'
+import { mirrorCurrentProject } from '@/lib/workspace/workspace-manager'
 import { saveProjectDocument } from './repository'
 import { createSaveQueue } from './save-queue'
 
@@ -26,7 +27,10 @@ export function useProjectAutosave(projectId: string) {
         return
       }
       if (event.type === 'saved') {
-        if (latest) lastWritten = latest
+        if (latest) {
+          lastWritten = latest
+          void mirrorCurrentProject(latest).catch(() => undefined)
+        }
         setSaveStatus('saved', {
           lastSavedAt: new Date().toISOString(),
           saveError: null,

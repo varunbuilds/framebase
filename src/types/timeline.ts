@@ -28,8 +28,10 @@ export type MediaAvailability =
 
 /**
  * Durable pointer to media bytes. The runtime object URL, File, and media
- * element are never stored here. `runtime` means the bytes exist only for
- * this page session and have no storage key yet.
+ * element are never stored here. `local` is a mediaSourceId in the
+ * user-selected workspace. `opfs` is a legacy id in browser storage.
+ * Neither means another device has the bytes. `runtime` exists only for
+ * this page session.
  */
 export type MediaLocator =
   | { kind: 'runtime' }

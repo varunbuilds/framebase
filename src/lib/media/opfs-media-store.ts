@@ -1,3 +1,5 @@
+import { createResolvingMediaStore } from '@/lib/workspace/resolving-store'
+import { boundWorkspaceMedia } from '@/lib/workspace/store-binding'
 import {
   assertMediaSourceId,
   MediaStoreUnavailableError,
@@ -28,11 +30,19 @@ export function isPersistentMediaAvailable(): boolean {
 }
 
 export function getMediaByteStore(): MediaByteStore {
-  if (!activeStore) activeStore = createOpfsMediaStore()
+  if (!activeStore) {
+    activeStore = isPersistentMediaAvailable()
+      ? createResolvingMediaStore({
+          workspace: boundWorkspaceMedia,
+          legacy: createOpfsMediaStore(),
+          unavailableMessage: 'Choose a local workspace before importing media.',
+        })
+      : createOpfsMediaStore()
+  }
   return activeStore
 }
 
-/** Tests inject a memory store. The app uses OPFS. */
+/** Tests inject a memory store. The browser prefers the workspace, then OPFS. */
 export function setMediaByteStore(store: MediaByteStore | null): void {
   activeStore = store
 }

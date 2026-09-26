@@ -1,10 +1,11 @@
 import { ALL_FORMATS, BlobSource, Input } from 'mediabunny'
+import { isWorkspaceReady } from '@/lib/workspace/workspace-manager'
 import type { MediaKind, MediaSource } from '@/types/timeline'
 import { createId } from '@/utils/id'
 import { secondsToMs } from '@/utils/time'
 import { MediaStoreUnavailableError } from './media-byte-store'
 import { deleteStoredMedia } from './delete-stored-media'
-import { isPersistentMediaAvailable, saveMedia } from './opfs-media-store'
+import { saveMedia } from './opfs-media-store'
 import { revokeObjectUrl, setObjectUrl } from './object-urls'
 
 export type ImportMediaResult =
@@ -131,11 +132,10 @@ export async function importLocalMediaFile(file: File): Promise<ImportMediaResul
       error: `"${file.name}" is not a supported video or audio file.`,
     }
   }
-  if (!isPersistentMediaAvailable()) {
+  if (!isWorkspaceReady()) {
     return {
       ok: false,
-      error:
-        'This browser cannot store imported media on this device, so it would disappear after a refresh.',
+      error: 'Choose a local workspace before importing media.',
     }
   }
 
@@ -161,7 +161,7 @@ export async function importLocalMediaFile(file: File): Promise<ImportMediaResul
       height: probed.height,
       sampleRate: probed.sampleRate,
       channelCount: probed.channelCount,
-      locator: { kind: 'opfs', key: id },
+      locator: { kind: 'local', key: id },
       availability: 'available',
       importedAt: new Date().toISOString(),
     }
@@ -182,7 +182,7 @@ export async function importLocalMediaFile(file: File): Promise<ImportMediaResul
 /** Drops a source that was stored but never added to the document. */
 export async function discardImportedMedia(source: MediaSource): Promise<void> {
   revokeObjectUrl(source.id)
-  if (source.locator.kind === 'opfs') {
+  if (source.locator.kind === 'opfs' || source.locator.kind === 'local') {
     await deleteStoredMedia(source.locator.key).catch(() => undefined)
   }
 }

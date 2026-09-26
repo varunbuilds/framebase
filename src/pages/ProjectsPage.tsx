@@ -1,8 +1,10 @@
 import { getRouteApi, Link, useNavigate, useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { NewProjectDialog } from '@/components/projects/NewProjectDialog'
+import { WorkspaceBar } from '@/components/projects/WorkspaceBar'
 import { useAuth } from '@/features/auth/use-auth'
 import { releaseProjectMedia } from '@/lib/media/release-project-media'
+import { mirrorCurrentProject } from '@/lib/workspace/workspace-manager'
 import {
   createProject,
   deleteProject,
@@ -45,6 +47,7 @@ export function ProjectsPage() {
     setError(null)
     try {
       const created = await createProject(user.id, project)
+      await mirrorCurrentProject(created.document).catch(() => undefined)
       await navigate({
         to: '/editor/$projectId',
         params: { projectId: created.id },
@@ -126,6 +129,8 @@ export function ProjectsPage() {
             New Project
           </button>
         </div>
+
+        <WorkspaceBar />
 
         {error && <p className="mb-4 text-[13px] text-fb-danger">{error}</p>}
 

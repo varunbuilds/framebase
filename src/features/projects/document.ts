@@ -33,7 +33,8 @@ export function durableProjectPayload(
 }
 
 function durableMediaSource(source: MediaSource): MediaSource {
-  if (source.locator.kind === 'opfs') {
+  // Device-local bytes are not a property of the shared project.
+  if (source.locator.kind === 'opfs' || source.locator.kind === 'local') {
     return { ...source, availability: 'known' }
   }
   if (source.locator.kind === 'runtime' && source.availability === 'available') {

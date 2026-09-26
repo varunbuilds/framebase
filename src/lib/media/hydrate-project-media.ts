@@ -113,7 +113,7 @@ export async function hydrateDocumentMedia(
           ? { ...source, availability: 'available' as const }
           : { ...source, availability: 'missing' as const }
       }
-      if (source.locator.kind !== 'opfs') return source
+      if (source.locator.kind !== 'opfs' && source.locator.kind !== 'local') return source
       return attachOpfsSource(
         document.id,
         source,
@@ -149,7 +149,7 @@ async function attachOpfsSource(
   attachedIds: string[],
   onStatus?: (mediaSourceId: string, availability: MediaAvailability) => void,
 ): Promise<MediaSource> {
-  if (source.locator.kind !== 'opfs') return source
+  if (source.locator.kind !== 'opfs' && source.locator.kind !== 'local') return source
   onStatus?.(source.id, 'loading')
   try {
     const present = await store.has(source.locator.key)
