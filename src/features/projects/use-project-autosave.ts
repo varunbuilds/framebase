@@ -3,7 +3,7 @@ import { projectContentEqual } from '@/features/editor/project'
 import { useEditorStore } from '@/stores/editor-store'
 import type { ProjectDocument } from '@/types/timeline'
 import { mirrorCurrentProject } from '@/lib/workspace/workspace-manager'
-import { saveProjectDocument } from './repository'
+import { saveLatestProjectDocument } from './repository'
 import { createSaveQueue } from './save-queue'
 
 const SAVE_DELAY_MS = 800
@@ -21,7 +21,9 @@ export function useProjectAutosave(projectId: string) {
     let latest: ProjectDocument | null = null
     let lastWritten: ProjectDocument | null = null
     let primed = false
-    const queue = createSaveQueue(saveProjectDocument, (event) => {
+    const queue = createSaveQueue(
+      () => saveLatestProjectDocument(() => useEditorStore.getState().document),
+      (event) => {
       if (event.type === 'saving') {
         setSaveStatus('saving', { saveError: null })
         return

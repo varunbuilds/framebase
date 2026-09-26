@@ -28,7 +28,7 @@ import { revokeAllObjectUrls, revokeObjectUrl } from '@/lib/media/object-urls'
 import { clearRuntimeDerivedCaches } from '@/lib/media/runtime-caches'
 import { clearWaveformPeaks } from '@/lib/media/waveform'
 import type { ClipDragState, EditorUiState } from '@/types/editor'
-import type { MediaSource, ProjectDocument, TimeMs } from '@/types/timeline'
+import type { MediaSource, ProjectDocument, RemoteMediaReference, TimeMs } from '@/types/timeline'
 
 function documentUsesOpfsKey(document: ProjectDocument, key: string): boolean {
   return document.mediaSources.some(
@@ -68,6 +68,8 @@ interface EditorActions {
   setClipDrag: (drag: ClipDragState | null) => void
   registerMediaSource: (source: MediaSource) => boolean
   unregisterMediaSource: (mediaSourceId: string) => boolean
+  /** Records a finished cloud copy. Not an undo step and not upload progress. */
+  attachRemoteMedia: (mediaSourceId: string, remote: RemoteMediaReference) => void
   addClip: (mediaSourceId: string, timelineStartMs?: TimeMs, trackId?: string) => boolean
   removeClip: (clipId: string) => boolean
   removeClips: (clipIds: string[]) => boolean
@@ -387,6 +389,40 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     })
     temporal.resume()
     return true
+  },
+
+  attachRemoteMedia: (mediaSourceId, remote) => {
+    const history = useEditorStore.temporal
+    const temporal = history.getState()
+    temporal.pause()
+    const apply = (document: ProjectDocument | undefined): ProjectDocument | undefined => {
+      if (!document?.mediaSources.some((source) => source.id === mediaSourceId)) {
+        return document
+      }
+      return {
+        ...document,
+        mediaSources: document.mediaSources.map((source) =>
+          source.id === mediaSourceId ? { ...source, remote } : source,
+        ),
+      }
+    }
+    const current = get().document
+    const next = apply(current)
+    if (next && next !== current) {
+      set({
+        document: commitDocument(current, next),
+        ui: { ...get().ui, saveStatus: 'unsaved' },
+      })
+    }
+    const stamp = <T extends { document?: ProjectDocument }>(state: T): T => {
+      const document = apply(state.document)
+      return document && document !== state.document ? { ...state, document } : state
+    }
+    history.setState({
+      pastStates: temporal.pastStates.map(stamp),
+      futureStates: temporal.futureStates.map(stamp),
+    })
+    temporal.resume()
   },
 
   unregisterMediaSource: (mediaSourceId) => {

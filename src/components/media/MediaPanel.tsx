@@ -1,6 +1,8 @@
 import { Film, Music2, Plus, Trash2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { discardImportedMedia, importLocalMediaFile, MEDIA_ACCEPT } from '@/lib/media/import'
+import { beginCloudUpload } from '@/lib/media/publish-source'
+import { useCloudUiRevision } from '@/lib/media/cloud-transfer'
 import {
   chooseWorkspace,
   isWorkspaceReady,
@@ -10,6 +12,7 @@ import { useWorkspace } from '@/lib/workspace/use-workspace'
 import { beginMediaDrag, endMediaDrag } from '@/lib/media/media-drag'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { useEditorStore } from '@/stores/editor-store'
+import { MediaCloudStatus } from './MediaCloudStatus'
 
 const MARQUEE_SLOP_PX = 4
 
@@ -38,6 +41,7 @@ export function MediaPanel() {
     (state) => state.unregisterMediaSource,
   )
   const addClip = useEditorStore((state) => state.addClip)
+  useCloudUiRevision()
   const setImportError = useEditorStore((state) => state.setImportError)
   const setImportStatus = useEditorStore((state) => state.setImportStatus)
   const workspace = useWorkspace()
@@ -103,7 +107,9 @@ export function MediaPanel() {
       }
       if (!registerMediaSource(result.source)) {
         await discardImportedMedia(result.source)
+        continue
       }
+      beginCloudUpload(result.source)
     }
 
     setImportStatus('idle')
@@ -309,11 +315,6 @@ export function MediaPanel() {
                           Loading media…
                         </span>
                       )}
-                      {source.availability === 'missing' && !objectUrl && (
-                        <span className="mt-1 block truncate px-0.5 text-[10px] text-fb-subtle">
-                          Unavailable on this device
-                        </span>
-                      )}
                       {source.availability === 'error' && (
                         <span className="mt-1 block truncate px-0.5 text-[10px] text-fb-danger">
                           Could not read this file
@@ -331,6 +332,7 @@ export function MediaPanel() {
                         )}
                       </span>
                     </button>
+                    {source.availability !== 'loading' && <MediaCloudStatus source={source} />}
                     <div className="absolute top-2 right-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
                       <button
                         type="button"

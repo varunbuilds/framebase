@@ -7,6 +7,7 @@ import type {
   MediaSource,
   ProjectCanvas,
   ProjectDocument,
+  RemoteMediaReference,
   Track,
   TrackKind,
 } from '@/types/timeline'
@@ -370,7 +371,26 @@ function validateMediaSource(value: unknown): MediaSource {
   if (source.channelCount != null) {
     next.channelCount = requiredNumber(source.channelCount, 'channelCount')
   }
+  const remote = validateRemote(next.id, source.remote)
+  if (remote) next.remote = remote
   return next
+}
+
+function validateRemote(sourceId: string, value: unknown): RemoteMediaReference | undefined {
+  if (value == null) return undefined
+  const remote = asRecord(value, 'Invalid remote media')
+  const assetId = requiredString(remote.assetId, 'remote asset')
+  const storagePath = requiredString(remote.storagePath, 'remote path')
+  const sizeBytes = requiredNumber(remote.sizeBytes, 'remote size')
+  if (assetId !== sourceId) throw new Error('Invalid remote media id')
+  if (storagePath !== `media/${sourceId}/source`) throw new Error('Invalid remote media path')
+  if (!Number.isFinite(sizeBytes) || sizeBytes < 0) throw new Error('Invalid remote media size')
+  return {
+    assetId,
+    storagePath,
+    sizeBytes,
+    uploadedAt: requiredString(remote.uploadedAt, 'remote uploadedAt'),
+  }
 }
 
 function validateLocator(value: unknown): MediaLocator {

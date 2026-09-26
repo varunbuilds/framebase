@@ -4,6 +4,7 @@ import { NewProjectDialog } from '@/components/projects/NewProjectDialog'
 import { WorkspaceBar } from '@/components/projects/WorkspaceBar'
 import { useAuth } from '@/features/auth/use-auth'
 import { releaseProjectMedia } from '@/lib/media/release-project-media'
+import { deleteProjectCloudMedia } from '@/lib/media/publish-source'
 import { mirrorCurrentProject } from '@/lib/workspace/workspace-manager'
 import {
   createProject,
@@ -67,7 +68,9 @@ export function ProjectsPage() {
         document = (await fetchProject(projectId)).document
       } catch (caught) {
         if (caught instanceof ProjectNotFoundError) throw caught
+        throw caught
       }
+      if (document) await deleteProjectCloudMedia(document)
       await deleteProject(projectId)
       if (document) await releaseProjectMedia(document)
       setRemovedIds((current) => [...current, projectId])

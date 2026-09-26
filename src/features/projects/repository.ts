@@ -108,6 +108,37 @@ export async function saveProjectDocument(document: ProjectDocument): Promise<vo
   }
 }
 
+let latestProjectWrite: Promise<void> = Promise.resolve()
+
+/**
+ * One project write at a time. The document is read when the write starts,
+ * so an earlier snapshot cannot replace a newer one.
+ */
+export function saveLatestProjectDocument(read: () => ProjectDocument): Promise<void> {
+  const run = latestProjectWrite.then(() => saveProjectDocument(read()))
+  latestProjectWrite = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
+/**
+ * How many project rows contain this media id. Storage deletion uses the
+ * count so a source listed by another project is not removed.
+ */
+export async function countProjectsWithMedia(mediaSourceId: string): Promise<number> {
+  const { count, error } = await getSupabase()
+    .from('projects')
+    .select('id', { count: 'exact', head: true })
+    .contains('document', {
+      document: { mediaSources: [{ id: mediaSourceId }] },
+    })
+
+  if (error) throw error
+  return count ?? 0
+}
+
 export async function deleteProject(projectId: string): Promise<void> {
   const { error } = await getSupabase().from('projects').delete().eq('id', projectId)
   if (error) throw error

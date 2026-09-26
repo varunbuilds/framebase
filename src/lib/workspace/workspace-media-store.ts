@@ -15,12 +15,9 @@ export function createWorkspaceMediaStore(mediaRoot: WorkspaceDirectory): MediaB
       assertMediaSourceId(mediaSourceId)
       const directory = await mediaDirectory(mediaRoot, mediaSourceId, true)
       if (!directory) throw new Error('Could not create the workspace media folder.')
-      const copied = new Uint8Array(await file.arrayBuffer())
-      const buffer = new ArrayBuffer(copied.byteLength)
-      new Uint8Array(buffer).set(copied)
-      const bytes = new Blob([buffer], {
-        type: metadata.mimeType || file.type || 'application/octet-stream',
-      })
+      const type = metadata.mimeType || file.type || 'application/octet-stream'
+      // Pass the blob through so the file-system writer can stream it.
+      const bytes = file.type === type ? file : new Blob([file], { type })
       await directory.writeFile('source', bytes)
       await directory.writeFile(
         'metadata.json',

@@ -39,6 +39,17 @@ export type MediaLocator =
   | { kind: 'opfs'; key: string }
   | { kind: 'remote'; key: string }
 
+/**
+ * Cloud copy of the original source. Not a local file, not a cache, and not
+ * upload progress. Absent when this media has not been uploaded.
+ */
+export interface RemoteMediaReference {
+  assetId: string
+  storagePath: string
+  sizeBytes: number
+  uploadedAt: string
+}
+
 /** Persistent media reference. Bytes and object URLs live outside this model. */
 export interface MediaSource {
   id: string
@@ -55,8 +66,16 @@ export interface MediaSource {
   height?: number
   sampleRate?: number
   channelCount?: number
-  /** Where durable or session bytes are addressed. Not a blob URL. */
+  /**
+   * Where this device addresses the bytes. Not a blob URL and not proof that
+   * another device has the file.
+   */
   locator: MediaLocator
+  /**
+   * Shared cloud copy. Independent of `availability`, which describes this
+   * device's runtime bytes. A source can be remote and still locally missing.
+   */
+  remote?: RemoteMediaReference
   availability: MediaAvailability
   importedAt: string
 }

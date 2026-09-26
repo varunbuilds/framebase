@@ -36,6 +36,7 @@ import {
 } from '@/lib/media/filmstrip-cache'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { discardImportedMedia, importLocalMediaFile } from '@/lib/media/import'
+import { beginCloudUpload } from '@/lib/media/publish-source'
 import {
   draggingMediaSourceId,
   draggingMediaSourceIds,
@@ -1174,6 +1175,7 @@ export function TimelinePanel() {
             await discardImportedMedia(result.source)
             continue
           }
+          beginCloudUpload(result.source)
           addClip(result.source.id, startMs, target.trackId)
           startMs += result.source.durationMs
         }
