@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ShareProjectDialog } from '@/components/projects/ShareProjectDialog'
 import { ToolbarNameSkeleton } from '@/components/layout/EditorSkeletons'
 import { CollaboratorAvatars } from '@/features/collab/CollaboratorAvatars'
+import { ExportDialog } from '@/features/export/ExportDialog'
 import { collabIndicator } from '@/features/collab/collab-session'
 import { useCollabSession } from '@/features/collab/collab-session-context'
 import { useEditorSession } from '@/features/editor/editor-session-context'
@@ -38,6 +39,7 @@ export function TopToolbar() {
   const [draftName, setDraftName] = useState(projectName)
   const inputRef = useRef<HTMLInputElement>(null)
   const [shareOpen, setShareOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
   const canShare = projectAccessRole(project.ownerId, user?.id) === 'owner'
   const session = useEditorSession()
   const collab = useCollabSession()
@@ -276,19 +278,18 @@ export function TopToolbar() {
         )}
         <button
           type="button"
-          disabled
-          title="Export is not implemented in this milestone"
-          aria-label="Export (not implemented)"
-          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/10 bg-white/[0.04] px-2.5 text-[12px] font-medium text-fb-subtle"
+          onClick={() => setExportOpen(true)}
+          disabled={!session.interactive}
+          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-fb-border bg-white/[0.06] px-2.5 text-[12px] font-medium text-fb-text hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Download size={13} strokeWidth={1.75} />
           Export
-          <span className="text-[10px] uppercase tracking-wide">Soon</span>
         </button>
       </div>
       {shareOpen && (
         <ShareProjectDialog projectId={project.id} onClose={() => setShareOpen(false)} />
       )}
+      {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
     </header>
   )
 }
