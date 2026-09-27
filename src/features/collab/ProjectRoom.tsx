@@ -15,6 +15,9 @@ import {
   projectRoomId,
 } from '../../../supabase/functions/_shared/project-room.ts'
 import { createCollabStorage } from './collab-document'
+import { resolveFramebaseUsers } from './collaborator-directory'
+import { EMPTY_EDITOR_PRESENCE } from './presence-schema'
+import { EditorPresenceBridge } from './use-collaborative-presence'
 import {
   collabConnection,
   collabFailureForCode,
@@ -34,8 +37,8 @@ import { requestProjectRoomToken } from './liveblocks-auth'
  * Only this component enters a room, so the landing, login, signup and project
  * list pages are untouched. Storage is seeded from the project's existing
  * ProjectDocument the first time a room is created; after that the room is the
- * authoritative collaborative document. Presence stays empty so the next
- * milestone can add cursors without changing the room boundary.
+ * authoritative collaborative document. Presence starts empty and stays
+ * ephemeral: cursors and selection never enter Storage.
  */
 export function ProjectRoom({
   projectId,
@@ -61,6 +64,7 @@ export function ProjectRoom({
           connection: 'disconnected',
           pendingChanges: false,
           errorMessage: 'This project id cannot be collaborated on.',
+          inRoom: false,
         }}
       >
         {children}
@@ -69,10 +73,13 @@ export function ProjectRoom({
   }
 
   return (
-    <LiveblocksProvider authEndpoint={requestProjectRoomToken}>
+    <LiveblocksProvider
+      authEndpoint={requestProjectRoomToken}
+      resolveUsers={resolveFramebaseUsers}
+    >
       <RoomProvider
         id={roomId}
-        initialPresence={{}}
+        initialPresence={EMPTY_EDITOR_PRESENCE}
         initialStorage={() => createCollabStorage(initialDocument)}
       >
         <ProjectRoomSession
@@ -140,7 +147,13 @@ function ProjectRoomSession({
     connection,
     pendingChanges: collabPendingChanges(syncStatus),
     errorMessage,
+    inRoom: true,
   }
 
-  return <CollabSessionProvider value={view}>{children}</CollabSessionProvider>
+  return (
+    <CollabSessionProvider value={view}>
+      <EditorPresenceBridge />
+      {children}
+    </CollabSessionProvider>
+  )
 }

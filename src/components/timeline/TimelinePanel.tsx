@@ -5,6 +5,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type HTMLAttributes,
+  type ReactNode,
   type RefObject,
   type PointerEvent as ReactPointerEvent,
   type DragEvent as ReactDragEvent,
@@ -27,6 +29,11 @@ import {
 } from '@/features/editor/project'
 import { useEditorHistory, useEditorStore } from '@/stores/editor-store'
 import { useEditorSession } from '@/features/editor/editor-session-context'
+import { useCollabSession } from '@/features/collab/collab-session-context'
+import {
+  CollaboratorClipMarks,
+  TimelinePresence,
+} from '@/features/collab/use-collaborative-presence'
 import { TimelineSkeleton } from '@/components/layout/EditorSkeletons'
 import {
   FILMSTRIP_FRAME_HEIGHT,
@@ -376,6 +383,7 @@ function TimelineClipBlock({
   onPointerDownMove,
   onPointerDownTrim,
   onBlade,
+  showCollaborators,
 }: {
   clip: Clip
   track: Track
@@ -391,6 +399,7 @@ function TimelineClipBlock({
   onPointerDownMove: (clientX: number, clientY: number) => void
   onPointerDownTrim: (edge: 'trim-in' | 'trim-out', clientX: number) => void
   onBlade: (clientX: number) => void
+  showCollaborators: boolean
 }) {
   const document = useEditorStore((state) => state.document)
   const media = getMediaSourceById(document, clip.mediaSourceId)
@@ -591,6 +600,7 @@ function TimelineClipBlock({
           onPointerDownTrim('trim-out', event.clientX)
         }}
       />
+      {showCollaborators ? <CollaboratorClipMarks clipId={clip.id} /> : null}
     </div>
   )
 }
@@ -665,8 +675,38 @@ function TimelinePlayhead({
   )
 }
 
+function TimelineScroll({
+  inRoom,
+  scrollRef,
+  grabbing,
+  children,
+  ...handlers
+}: {
+  inRoom: boolean
+  scrollRef: RefObject<HTMLDivElement | null>
+  grabbing: boolean
+  children: ReactNode
+} & HTMLAttributes<HTMLDivElement>) {
+  const scroll = (
+    <div
+      ref={scrollRef}
+      className={`${
+        inRoom
+          ? 'absolute inset-0 overflow-auto overscroll-none'
+          : 'relative min-h-0 min-w-0 flex-1 overflow-auto overscroll-none'
+      } ${grabbing ? 'cursor-grabbing' : 'cursor-default'}`}
+      {...handlers}
+    >
+      {children}
+    </div>
+  )
+  if (!inRoom) return scroll
+  return <TimelinePresence>{scroll}</TimelinePresence>
+}
+
 export function TimelinePanel() {
   const session = useEditorSession()
+  const inRoom = useCollabSession()?.inRoom === true
   const document = useEditorStore((state) => state.document)
   const pixelsPerSecond = useEditorStore((state) => state.ui.pixelsPerSecond)
   const timelineScrollLeft = useEditorStore(
@@ -1831,11 +1871,10 @@ export function TimelinePanel() {
         </div>
       </div>
 
-      <div
-        ref={bodyScrollRef}
-        className={`relative min-h-0 min-w-0 flex-1 overflow-auto overscroll-none ${
-          isHandDragging || isClipMoving ? 'cursor-grabbing' : 'cursor-default'
-        }`}
+      <TimelineScroll
+        inRoom={inRoom}
+        scrollRef={bodyScrollRef}
+        grabbing={isHandDragging || isClipMoving}
         onClick={() => {
           if (timelineTool === 'cut') return
           if (suppressClickRef.current) {
@@ -2033,6 +2072,7 @@ export function TimelinePanel() {
                         previewTimelineStartMs={placement?.timelineStartMs}
                         isMoving={isMoving}
                         blade={timelineTool === 'cut'}
+                        showCollaborators={inRoom}
                         onSelect={(additive) => {
                           if (suppressClipSelectRef.current) {
                             suppressClipSelectRef.current = false
@@ -2176,7 +2216,7 @@ export function TimelinePanel() {
 
           <TimelinePlayhead viewportRef={bodyScrollRef} />
         </div>
-      </div>
+      </TimelineScroll>
     </section>
   )
 }

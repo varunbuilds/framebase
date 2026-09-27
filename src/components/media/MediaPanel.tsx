@@ -2,6 +2,7 @@ import { Film, Music2, Plus, Trash2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { discardImportedMedia, importLocalMediaFile, MEDIA_ACCEPT } from '@/lib/media/import'
 import { beginCloudUpload } from '@/lib/media/publish-source'
+import { WithActiveArea } from '@/features/collab/use-collaborative-presence'
 import { getCloudTransfer, useCloudUiRevision } from '@/lib/media/cloud-transfer'
 import {
   chooseWorkspace,
@@ -214,6 +215,7 @@ export function MediaPanel() {
   }
 
   return (
+    <WithActiveArea area="media">
     <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-fb-panel">
       <div className="flex h-11 shrink-0 items-center justify-between px-3">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
@@ -404,5 +406,6 @@ export function MediaPanel() {
         </div>
       )}
     </aside>
+    </WithActiveArea>
   )
 }

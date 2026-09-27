@@ -39,7 +39,7 @@ function deny(status: number, reason: string): Response {
   return json({ error: 'forbidden', reason }, status)
 }
 
-/** A display name for Liveblocks user info. Presence lands in a later milestone. */
+/** A display name for Liveblocks user info. Presence reads this name; it is not stored. */
 function displayName(user: {
   email?: string | null
   user_metadata?: Record<string, unknown> | null

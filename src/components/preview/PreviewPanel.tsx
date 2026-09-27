@@ -12,6 +12,7 @@ import { useTimelinePlayback } from '@/features/editor/use-timeline-playback'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { useEditorStore } from '@/stores/editor-store'
 import { formatTimecode, stepPlayheadMs } from '@/utils/time'
+import { WithActiveArea } from '@/features/collab/use-collaborative-presence'
 
 const editorRoute = getRouteApi('/authenticated/editor/$projectId')
 
@@ -140,6 +141,7 @@ export function PreviewPanel() {
   const VolumeIcon = silent ? VolumeX : volume < 0.5 ? Volume1 : Volume2
 
   return (
+    <WithActiveArea area="preview">
     <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-fb-panel">
       <div
         className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 sm:p-6"
@@ -259,5 +261,6 @@ export function PreviewPanel() {
         </div>
       </div>
     </section>
+    </WithActiveArea>
   )
 }

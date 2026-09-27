@@ -6,6 +6,7 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { ShareProjectDialog } from '@/components/projects/ShareProjectDialog'
 import { ToolbarNameSkeleton } from '@/components/layout/EditorSkeletons'
+import { CollaboratorAvatars } from '@/features/collab/CollaboratorAvatars'
 import { collabIndicator } from '@/features/collab/collab-session'
 import { useCollabSession } from '@/features/collab/collab-session-context'
 import { useEditorSession } from '@/features/editor/editor-session-context'
@@ -253,6 +254,7 @@ export function TopToolbar() {
       {collab ? <CollabStatus /> : null}
 
       <div className="ml-auto flex items-center gap-2">
+        <CollaboratorAvatars />
         <button
           type="button"
           onClick={() => requestSave()}

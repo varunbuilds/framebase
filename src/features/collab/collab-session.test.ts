@@ -15,6 +15,7 @@ function view(overrides: Partial<CollabSessionView> = {}): CollabSessionView {
     connection: 'connected',
     pendingChanges: false,
     errorMessage: null,
+    inRoom: true,
     ...overrides,
   }
 }

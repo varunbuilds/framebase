@@ -9,8 +9,8 @@
  * Media binaries are never stored here. They stay in Supabase Storage, the
  * local workspace and OPFS.
  *
- * Presence and RoomEvent typing arrive with the presence milestone; they are
- * deliberately absent because nothing reads them yet.
+ * Presence is ephemeral (cursor, selection, active area). It is not Storage
+ * and it is not part of ProjectDocument.
  */
 import type { LiveMap, LiveObject } from '@liveblocks/client'
 import type {
@@ -19,6 +19,7 @@ import type {
   CollabProjectFields,
   CollabTrackFields,
 } from '@/features/collab/collab-schema'
+import type { EditorPresence } from '@/features/collab/presence-schema'
 
 declare global {
   interface Liveblocks {
@@ -29,13 +30,20 @@ declare global {
       mediaSources: LiveMap<string, LiveObject<CollabMediaSourceFields>>
     }
 
-    /** Set by the Liveblocks auth endpoint from the Supabase user. */
+    /**
+     * Set by the Liveblocks auth endpoint from the Supabase user.
+     * `color` and `avatar` are filled by the client resolver for Liveblocks UI.
+     */
     UserMeta: {
       id: string
       info: {
         name: string
+        color?: string
+        avatar?: string
       }
     }
+
+    Presence: EditorPresence
   }
 }
 

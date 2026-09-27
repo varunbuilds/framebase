@@ -66,7 +66,10 @@ export function EditorShell() {
   }
 
   return (
-    <div className="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-fb-app text-fb-text">
+    <div
+      data-theme="dark"
+      className="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-fb-app text-fb-text"
+    >
       <TopToolbar />
       <CollabConnectionBanner />
       <WorkspaceConnectionBanner />

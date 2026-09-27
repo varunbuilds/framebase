@@ -14,6 +14,7 @@
   "dependencies": {
     "@liveblocks/client": "^3.24.2",
     "@liveblocks/react": "^3.24.2",
+    "@liveblocks/react-ui": "^3.24.2",
     "@supabase/supabase-js": "^2.117.2",
     "@tanstack/react-router": "^1.170.39",
     "lucide-react": "^1.47.0",

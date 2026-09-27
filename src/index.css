@@ -169,3 +169,18 @@ html.media-dragging * {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/*
+ * Liveblocks ships `.lb-cursors { position: relative; overflow: clip }` outside
+ * any cascade layer, so it beats Tailwind's `absolute`. Without an explicit
+ * box the clip hides the timeline. Fill the panel, and keep cursors above
+ * the ruler and playhead.
+ */
+.timeline-presence > .lb-cursors {
+  position: absolute;
+  inset: 0;
+}
+
+.timeline-presence .lb-cursors-container {
+  z-index: 60;
+}

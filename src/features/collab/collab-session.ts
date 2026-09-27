@@ -29,6 +29,8 @@ export type CollabSessionView = {
   /** Local edits accepted by the editor but not yet acknowledged by the server. */
   pendingChanges: boolean
   errorMessage: string | null
+  /** True only while this editor is inside the project Liveblocks room. */
+  inRoom: boolean
 }
 
 export function collabConnection(status: Status): CollabConnection {

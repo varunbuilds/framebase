@@ -4,6 +4,7 @@ import { useEditorStore } from '@/stores/editor-store'
 import { useEditorSession } from '@/features/editor/editor-session-context'
 import { InspectorSkeleton } from '@/components/layout/EditorSkeletons'
 import { formatDurationShort, formatTimecode, msToSeconds } from '@/utils/time'
+import { WithActiveArea } from '@/features/collab/use-collaborative-presence'
 
 function Field({
   label,
@@ -78,6 +79,7 @@ export function InspectorPanel() {
   const durationMs = clip ? clip.sourceOutMs - clip.sourceInMs : 0
 
   return (
+    <WithActiveArea area="inspector">
     <aside className="flex h-full min-h-0 w-[255px] shrink-0 flex-col border-l border-fb-border bg-fb-panel">
       <div className="flex h-11 items-center px-3">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fb-muted">
@@ -172,5 +174,6 @@ export function InspectorPanel() {
         )}
       </div>
     </aside>
+    </WithActiveArea>
   )
 }
