@@ -1,4 +1,8 @@
-import { getPlaybackEndMs, resolveActiveVideoClip } from '@/features/editor/playback'
+import {
+  collectTimelineAudio,
+  getPlaybackEndMs,
+  resolveActiveVideoClip,
+} from '@/features/editor/playback'
 import { getMediaSourceById, getTrackById } from '@/features/editor/project'
 import type {
   CanvasAspectRatio,
@@ -84,36 +88,18 @@ export function pictureAt(
 }
 
 /**
- * Audio the export will mux.
- * Clips on unmuted audio tracks are mixed at their timeline positions.
- * A video file's audio is included only when no audio-track clip owns that
- * source, so a muted or moved audio clip is not replaced by the video file.
+ * Audio the export will mux. Same clip selection as preview playback:
+ * unmuted audio-track clips, plus a video file's audio only when no
+ * audio-track clip owns that source.
  */
 export function audioSpansForExport(document: ProjectDocument): ExportAudioSpan[] {
   const endMs = exportDurationMs(document)
+  const { audibleAudioClips, embeddedVideoClips } = collectTimelineAudio(document)
   const spans: ExportAudioSpan[] = []
-  const represented = new Set<string>()
-
-  for (const clip of document.clips) {
-    const track = getTrackById(document, clip.trackId)
-    if (!track || track.kind !== 'audio') continue
-    const source = getMediaSourceById(document, clip.mediaSourceId)
-    if (!source?.hasAudio) continue
-    represented.add(source.id)
-    if (track.muted) continue
+  for (const { clip, source } of [...audibleAudioClips, ...embeddedVideoClips]) {
     const span = spanForClip(clip, source, endMs)
     if (span) spans.push(span)
   }
-
-  for (const clip of document.clips) {
-    const track = getTrackById(document, clip.trackId)
-    if (!track || track.kind !== 'video') continue
-    const source = getMediaSourceById(document, clip.mediaSourceId)
-    if (!source?.hasAudio || represented.has(source.id)) continue
-    const span = spanForClip(clip, source, endMs)
-    if (span) spans.push(span)
-  }
-
   return spans
 }
 
@@ -192,6 +178,20 @@ export function exportPhaseLabel(
   if (phase === 'finalizing') return 'Finalizing…'
   const percent = exportPercent(fraction)
   return percent == null ? 'Rendering…' : `Rendering… ${percent}%`
+}
+
+/**
+ * Timeline time of one decoded audio sample.
+ * Timestamp is seconds in the source file; subtracting sourceIn keeps a
+ * trimmed clip on its timeline start, including after a leading gap.
+ */
+export function placedAudioTimelineMs(args: {
+  timelineStartMs: number
+  sourceInMs: number
+  sampleTimestampSec: number
+}): number {
+  const sourceInSec = args.sourceInMs / 1000
+  return args.timelineStartMs + Math.round((args.sampleTimestampSec - sourceInSec) * 1000)
 }
 
 /** Sample index in the mix for a timeline instant. */

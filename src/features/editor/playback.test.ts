@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
   advanceThroughGap,
+  audioClipsToPrepare,
+  audioPlayheadSeekSec,
+  collectTimelineAudio,
   getPlaybackEndMs,
   nextPlayheadWhilePlaying,
   resolveActiveVideoClip,
   resolvePlaybackAt,
   resolvePlaybackTrack,
   sourceToTimelineTimeMs,
+  stepPlayheadMs,
   timelineToSourceTimeMs,
+  videoSourceUsesEmbeddedAudio,
 } from '@/features/editor/playback'
 import type { Clip, MediaSource, ProjectDocument, Track } from '@/types/timeline'
 
@@ -183,7 +188,7 @@ describe('resolvePlaybackAt', () => {
     }
   })
 
-  it('ignores clips on non-active tracks', () => {
+  it('keeps playing through audio when no video clip is under the playhead', () => {
     const audioClip = clip({
       id: 'ca',
       mediaSourceId: 'm1',
@@ -197,9 +202,9 @@ describe('resolvePlaybackAt', () => {
       clips: [audioClip],
       mediaSources: [sourceA],
     })
-    // Active track is video; audio-only content → empty video timeline.
-    expect(getPlaybackEndMs(mixed)).toBe(0)
-    expect(resolvePlaybackAt(mixed, 100).status).toBe('empty')
+    expect(getPlaybackEndMs(mixed)).toBe(5000)
+    expect(resolveActiveVideoClip(mixed, 100)).toBeNull()
+    expect(resolvePlaybackAt(mixed, 100).status).toBe('gap')
   })
 
   it('plays consecutive clips without a gap at the shared boundary', () => {
@@ -314,6 +319,151 @@ describe('nextPlayheadWhilePlaying', () => {
         playbackEndMs: 10_000,
       }),
     ).toBe(5016)
+  })
+})
+
+describe('gap entry playback', () => {
+  const audio = track({ id: 'a1', name: 'Audio 1', kind: 'audio', order: 0 })
+  const source = media({
+    id: 'm1',
+    name: 'voice.wav',
+    kind: 'audio',
+    durationMs: 20_000,
+  })
+
+  const afterGap = project({
+    tracks: [audio],
+    mediaSources: [source],
+    clips: [
+      clip({
+        id: 'voice',
+        mediaSourceId: 'm1',
+        trackId: 'a1',
+        timelineStartMs: 5_000,
+        sourceInMs: 0,
+        sourceOutMs: 5_000,
+      }),
+    ],
+  })
+
+  it('crosses from a gap into a clip without stopping on the boundary', () => {
+    expect(stepPlayheadMs(0, 16, 10_000)).toBe(16)
+    expect(stepPlayheadMs(4_900, 16, 10_000)).toBe(4_916)
+    expect(stepPlayheadMs(4_900, 200, 10_000)).toBe(5_100)
+    expect(stepPlayheadMs(4_990, 100, 10_000)).toBe(5_090)
+
+    const entered = resolvePlaybackAt(afterGap, 5_100)
+    expect(entered.status).toBe('clip')
+    if (entered.status === 'clip') expect(entered.sourceTimeMs).toBe(100)
+  })
+
+  it('advances through a clip that starts at timeline zero', () => {
+    expect(stepPlayheadMs(0, 16, 5_000)).toBe(16)
+    const atStart = resolvePlaybackAt(
+      project({
+        tracks: [audio],
+        mediaSources: [source],
+        clips: [
+          clip({
+            id: 'voice',
+            mediaSourceId: 'm1',
+            trackId: 'a1',
+            timelineStartMs: 0,
+            sourceInMs: 0,
+            sourceOutMs: 5_000,
+          }),
+        ],
+      }),
+      0,
+    )
+    expect(atStart.status).toBe('clip')
+  })
+
+  it('keeps moving through gaps between several clips', () => {
+    const gapped = project({
+      tracks: [audio],
+      mediaSources: [source],
+      clips: [
+        clip({
+          id: 'first',
+          mediaSourceId: 'm1',
+          trackId: 'a1',
+          timelineStartMs: 2_000,
+          sourceInMs: 0,
+          sourceOutMs: 1_000,
+        }),
+        clip({
+          id: 'second',
+          mediaSourceId: 'm1',
+          trackId: 'a1',
+          timelineStartMs: 8_000,
+          sourceInMs: 1_500,
+          sourceOutMs: 3_000,
+        }),
+      ],
+    })
+
+    expect(stepPlayheadMs(1_900, 200, 9_500)).toBe(2_100)
+    expect(stepPlayheadMs(3_500, 200, 9_500)).toBe(3_700)
+    expect(stepPlayheadMs(7_900, 200, 9_500)).toBe(8_100)
+
+    const entered = resolvePlaybackAt(gapped, 8_100)
+    expect(entered.status).toBe('clip')
+    if (entered.status === 'clip') {
+      expect(entered.clip.id).toBe('second')
+      expect(entered.sourceTimeMs).toBe(1_600)
+    }
+  })
+
+  it('keeps consecutive clips meeting at the shared boundary', () => {
+    const consecutive = project({
+      tracks: [audio],
+      mediaSources: [source],
+      clips: [
+        clip({
+          id: 'first',
+          mediaSourceId: 'm1',
+          trackId: 'a1',
+          timelineStartMs: 0,
+          sourceInMs: 200,
+          sourceOutMs: 1_000,
+        }),
+        clip({
+          id: 'second',
+          mediaSourceId: 'm1',
+          trackId: 'a1',
+          timelineStartMs: 800,
+          sourceInMs: 0,
+          sourceOutMs: 1_000,
+        }),
+      ],
+    })
+
+    const handoff = resolvePlaybackAt(consecutive, 800)
+    expect(handoff.status).toBe('clip')
+    if (handoff.status === 'clip') {
+      expect(handoff.clip.id).toBe('second')
+      expect(handoff.sourceTimeMs).toBe(0)
+    }
+  })
+
+  it('keeps the playhead moving while a new clip is still at its start', () => {
+    expect(
+      nextPlayheadWhilePlaying({
+        playheadMs: 5_150,
+        deltaMs: 16,
+        mediaTimelineMs: null,
+        playbackEndMs: 10_000,
+      }),
+    ).toBe(5_166)
+    expect(
+      nextPlayheadWhilePlaying({
+        playheadMs: 5_150,
+        deltaMs: 16,
+        mediaTimelineMs: 5_000,
+        playbackEndMs: 10_000,
+      }),
+    ).toBe(5_166)
   })
 })
 
@@ -476,7 +626,8 @@ describe('resolveActiveVideoClip', () => {
     })
 
     expect(resolveActiveVideoClip(doc, 1000)).toBeNull()
-    expect(resolvePlaybackAt(doc, 1000).status).toBe('empty')
+    expect(getPlaybackEndMs(doc)).toBe(8000)
+    expect(resolvePlaybackAt(doc, 1000).status).toBe('gap')
   })
 
   it('still shows a muted or locked video clip', () => {
@@ -525,6 +676,45 @@ describe('getPlaybackEndMs', () => {
     ).toBe(0)
   })
 
+  it('continues past the last video clip while audio is still on the timeline', () => {
+    const doc = project({
+      tracks: [
+        track({ id: 'v1', name: 'Video 1', kind: 'video', order: 0 }),
+        track({ id: 'a1', name: 'Audio 1', kind: 'audio', order: 1 }),
+      ],
+      clips: [
+        clip({
+          id: 'picture',
+          mediaSourceId: 'm1',
+          trackId: 'v1',
+          timelineStartMs: 0,
+          sourceInMs: 0,
+          sourceOutMs: 11_000,
+        }),
+        clip({
+          id: 'tail',
+          mediaSourceId: 'm2',
+          trackId: 'a1',
+          timelineStartMs: 12_000,
+          sourceInMs: 0,
+          sourceOutMs: 4_000,
+        }),
+      ],
+      mediaSources: [
+        media({ id: 'm1', name: 'A.mp4', kind: 'video', durationMs: 11_000 }),
+        media({ id: 'm2', name: 'for Chanel.mov', kind: 'audio', durationMs: 8_000 }),
+      ],
+    })
+
+    expect(getPlaybackEndMs(doc)).toBe(16_000)
+    expect(resolvePlaybackAt(doc, 11_000).status).toBe('gap')
+    expect(resolveActiveVideoClip(doc, 13_000)).toBeNull()
+    expect(audioClipsToPrepare(doc, 13_000).some((cue) => cue.clipId === 'tail' && cue.active)).toBe(
+      true,
+    )
+    expect(resolvePlaybackAt(doc, 16_000).status).toBe('ended')
+  })
+
   it('uses clip ends even when the media file is not available', () => {
     const unavailable = media({
       id: 'm1',
@@ -549,5 +739,320 @@ describe('getPlaybackEndMs', () => {
     })
     expect(getPlaybackEndMs(doc)).toBe(2500)
     expect(resolvePlaybackAt(doc, 0).status).toBe('clip')
+  })
+})
+
+describe('audio timeline resolution', () => {
+  const picture = media({
+    id: 'video',
+    name: 'video.mp4',
+    kind: 'video',
+    durationMs: 20_000,
+    hasVideo: true,
+    hasAudio: true,
+  })
+  const music = media({
+    id: 'music',
+    name: 'music.wav',
+    kind: 'audio',
+    durationMs: 20_000,
+    hasAudio: true,
+  })
+  const videoTop = track({ id: 'v-top', name: 'Video 2', kind: 'video', order: -2 })
+  const video = track({ id: 'v1', name: 'Video 1', kind: 'video', order: 0 })
+  const audioAbove = track({ id: 'a-above', name: 'Audio above', kind: 'audio', order: -8 })
+  const audioBelow = track({ id: 'a-below', name: 'Audio below', kind: 'audio', order: 12 })
+  const audioMid = track({ id: 'a-mid', name: 'Audio mid', kind: 'audio', order: 4 })
+
+  const separated = project({
+    tracks: [videoTop, video, audioBelow],
+    mediaSources: [picture, music],
+    clips: [
+      clip({
+        id: 'picture',
+        mediaSourceId: 'video',
+        trackId: 'v1',
+        timelineStartMs: 0,
+        sourceInMs: 0,
+        sourceOutMs: 10_000,
+      }),
+      clip({
+        id: 'other',
+        mediaSourceId: 'video',
+        trackId: 'v-top',
+        timelineStartMs: 0,
+        sourceInMs: 0,
+        sourceOutMs: 4_000,
+      }),
+      clip({
+        id: 'song',
+        mediaSourceId: 'music',
+        trackId: 'a-below',
+        timelineStartMs: 5_000,
+        sourceInMs: 0,
+        sourceOutMs: 5_000,
+      }),
+    ],
+  })
+
+  it('keeps a leading gap empty and prepares the clip before the playhead reaches it', () => {
+    expect(audioClipsToPrepare(separated, 0).filter((cue) => cue.active)).toEqual([])
+    const warming = audioClipsToPrepare(separated, 0)
+    expect(warming).toEqual([
+      expect.objectContaining({
+        clipId: 'song',
+        active: false,
+        parkSourceMs: 0,
+        timelineStartMs: 5_000,
+      }),
+    ])
+  })
+
+  it('activates an audio clip exactly at its timeline start', () => {
+    expect(audioClipsToPrepare(separated, 5_000)).toEqual([
+      expect.objectContaining({
+        clipId: 'song',
+        mediaSourceId: 'music',
+        active: true,
+        parkSourceMs: 0,
+        sourceInMs: 0,
+      }),
+    ])
+    expect(audioClipsToPrepare(separated, 9_999)[0]?.active).toBe(true)
+    expect(audioClipsToPrepare(separated, 10_000)).toEqual([])
+  })
+
+  it('plays an audio clip that starts at timeline zero', () => {
+    const atZero = project({
+      tracks: [video, audioBelow],
+      mediaSources: [music],
+      clips: [
+        clip({
+          id: 'song',
+          mediaSourceId: 'music',
+          trackId: 'a-below',
+          timelineStartMs: 0,
+          sourceInMs: 0,
+          sourceOutMs: 2_000,
+        }),
+      ],
+    })
+    expect(audioClipsToPrepare(atZero, 0)[0]).toMatchObject({
+      clipId: 'song',
+      active: true,
+      parkSourceMs: 0,
+    })
+  })
+
+  it('resolves audio before or after the picture, not from the video clip', () => {
+    const doc = project({
+      tracks: [video, audioMid],
+      mediaSources: [picture, music],
+      clips: [
+        clip({
+          id: 'picture',
+          mediaSourceId: 'video',
+          trackId: 'v1',
+          timelineStartMs: 2_000,
+          sourceInMs: 0,
+          sourceOutMs: 2_000,
+        }),
+        clip({
+          id: 'early',
+          mediaSourceId: 'music',
+          trackId: 'a-mid',
+          timelineStartMs: 0,
+          sourceInMs: 100,
+          sourceOutMs: 1_100,
+        }),
+        clip({
+          id: 'late',
+          mediaSourceId: 'music',
+          trackId: 'a-mid',
+          timelineStartMs: 6_000,
+          sourceInMs: 0,
+          sourceOutMs: 1_000,
+        }),
+      ],
+    })
+    expect(audioClipsToPrepare(doc, 0)[0]).toMatchObject({
+      clipId: 'early',
+      active: true,
+      parkSourceMs: 100,
+    })
+    expect(resolveActiveVideoClip(doc, 0)).toBeNull()
+    expect(audioClipsToPrepare(doc, 2_000).some((cue) => cue.active)).toBe(false)
+    expect(audioClipsToPrepare(doc, 6_000)[0]).toMatchObject({
+      clipId: 'late',
+      active: true,
+    })
+  })
+
+  it('uses track kind and the clip interval, not visual order', () => {
+    const above = project({
+      tracks: [audioAbove, videoTop, video],
+      mediaSources: [picture, music],
+      clips: [
+        clip({
+          id: 'picture',
+          mediaSourceId: 'video',
+          trackId: 'v1',
+          timelineStartMs: 0,
+          sourceInMs: 0,
+          sourceOutMs: 8_000,
+        }),
+        clip({
+          id: 'song',
+          mediaSourceId: 'music',
+          trackId: 'a-above',
+          timelineStartMs: 1_000,
+          sourceInMs: 250,
+          sourceOutMs: 2_250,
+        }),
+      ],
+    })
+    const below = project({
+      tracks: [video, audioBelow],
+      mediaSources: [picture, music],
+      clips: [
+        clip({
+          id: 'picture',
+          mediaSourceId: 'video',
+          trackId: 'v1',
+          timelineStartMs: 0,
+          sourceInMs: 0,
+          sourceOutMs: 8_000,
+        }),
+        clip({
+          id: 'song',
+          mediaSourceId: 'music',
+          trackId: 'a-below',
+          timelineStartMs: 1_000,
+          sourceInMs: 250,
+          sourceOutMs: 2_250,
+        }),
+      ],
+    })
+    expect(audioClipsToPrepare(above, 1_000)[0]).toMatchObject({
+      clipId: 'song',
+      active: true,
+      parkSourceMs: 250,
+    })
+    expect(audioClipsToPrepare(below, 1_000)[0]).toMatchObject({
+      clipId: 'song',
+      active: true,
+      parkSourceMs: 250,
+    })
+    expect(audioClipsToPrepare(above, 1_500)[0]?.parkSourceMs).toBe(750)
+    expect(audioClipsToPrepare(above, 3_000)).toEqual([])
+  })
+
+  it('mixes overlapping clips from more than one audio track', () => {
+    const doc = project({
+      tracks: [video, audioAbove, audioBelow],
+      mediaSources: [picture, music],
+      clips: [
+        clip({
+          id: 'high',
+          mediaSourceId: 'music',
+          trackId: 'a-above',
+          timelineStartMs: 0,
+          sourceInMs: 0,
+          sourceOutMs: 2_000,
+        }),
+        clip({
+          id: 'low',
+          mediaSourceId: 'music',
+          trackId: 'a-below',
+          timelineStartMs: 500,
+          sourceInMs: 0,
+          sourceOutMs: 2_000,
+        }),
+      ],
+    })
+    expect(audioClipsToPrepare(doc, 800).filter((cue) => cue.active).map((cue) => cue.clipId)).toEqual([
+      'high',
+      'low',
+    ])
+    expect(audioClipsToPrepare(doc, 0).filter((cue) => cue.active).map((cue) => cue.clipId)).toEqual([
+      'high',
+    ])
+  })
+
+  it('honors sourceIn and sourceOut', () => {
+    const doc = project({
+      tracks: [audioMid],
+      mediaSources: [music],
+      clips: [
+        clip({
+          id: 'trimmed',
+          mediaSourceId: 'music',
+          trackId: 'a-mid',
+          timelineStartMs: 1_000,
+          sourceInMs: 2_000,
+          sourceOutMs: 3_500,
+        }),
+      ],
+    })
+    expect(audioClipsToPrepare(doc, 999).find((cue) => cue.active)).toBeUndefined()
+    expect(audioClipsToPrepare(doc, 1_000)[0]).toMatchObject({
+      active: true,
+      parkSourceMs: 2_000,
+      sourceOutMs: 3_500,
+    })
+    expect(audioClipsToPrepare(doc, 2_499)[0]?.active).toBe(true)
+    expect(audioClipsToPrepare(doc, 2_500)).toEqual([])
+  })
+
+  it('does not play a video file when an audio-track clip owns that source', () => {
+    const owned = project({
+      tracks: [video, audioBelow],
+      mediaSources: [picture],
+      clips: [
+        clip({
+          id: 'picture',
+          mediaSourceId: 'video',
+          trackId: 'v1',
+          timelineStartMs: 0,
+          sourceInMs: 0,
+          sourceOutMs: 4_000,
+        }),
+        clip({
+          id: 'voice',
+          mediaSourceId: 'video',
+          trackId: 'a-below',
+          timelineStartMs: 5_000,
+          sourceInMs: 500,
+          sourceOutMs: 1_500,
+        }),
+      ],
+    })
+    expect(videoSourceUsesEmbeddedAudio(owned, 'video')).toBe(false)
+    expect(audioClipsToPrepare(owned, 5_000)[0]).toMatchObject({
+      clipId: 'voice',
+      active: true,
+      parkSourceMs: 500,
+    })
+    expect(collectTimelineAudio(owned).embeddedVideoClips).toEqual([])
+  })
+
+  it('keeps embedded video audio when no audio-track clip owns that source', () => {
+    expect(videoSourceUsesEmbeddedAudio(separated, 'video')).toBe(true)
+    expect(collectTimelineAudio(separated).embeddedVideoClips.map((item) => item.clip.id)).toEqual([
+      'picture',
+      'other',
+    ])
+    expect(collectTimelineAudio(separated).audibleAudioClips.map((item) => item.clip.id)).toEqual([
+      'song',
+    ])
+  })
+
+  it('leaves a warmed element on the clip in-point instead of jumping to the playhead', () => {
+    expect(
+      audioPlayheadSeekSec({ currentSec: 0, sourceInSec: 0, targetSec: 0.03 }),
+    ).toBeNull()
+    expect(
+      audioPlayheadSeekSec({ currentSec: 0, sourceInSec: 2, targetSec: 2.4 }),
+    ).toBe(2.4)
   })
 })

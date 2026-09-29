@@ -21,6 +21,7 @@ import {
   exportFrameWindow,
   exportSizeFor,
   mixIntoTimeline,
+  placedAudioTimelineMs,
   pictureAt,
   requiredMediaSources,
   timelineSampleOffset,
@@ -348,8 +349,11 @@ async function mixSpans(args: {
           continue
         }
         const planes = readPlanar(used)
-        const timelineMs =
-          span.timelineStartMs + Math.round((used.timestamp - sourceInSec) * 1000)
+        const timelineMs = placedAudioTimelineMs({
+          timelineStartMs: span.timelineStartMs,
+          sourceInMs: span.sourceInMs,
+          sampleTimestampSec: used.timestamp,
+        })
         const offset = timelineSampleOffset(timelineMs)
         const primary = planes[0]
         if (primary) {

@@ -18,6 +18,7 @@ import {
   exportFrameWindow,
   exportSizeFor,
   mixIntoTimeline,
+  placedAudioTimelineMs,
   pictureAt,
   reduceExportJob,
   requiredMediaSources,
@@ -376,6 +377,98 @@ describe('export job', () => {
       detail: 'TypeError: config.quality and config.bitrate cannot both be provided.',
     })
     expect(reduceExportJob(job, { type: 'reset' })).toEqual({ status: 'idle' })
+  })
+})
+
+describe('audio placement', () => {
+  it('keeps a leading gap as silence before the clip', () => {
+    const placed = placedAudioTimelineMs({
+      timelineStartMs: 5_000,
+      sourceInMs: 0,
+      sampleTimestampSec: 0,
+    })
+    expect(placed).toBe(5_000)
+    const gapSamples = timelineSampleOffset(placed)
+    const destination = new Float32Array(gapSamples + 2)
+    mixIntoTimeline({
+      destination,
+      source: new Float32Array([0.4, 0.4]),
+      sourceRate: 48_000,
+      destinationRate: 48_000,
+      destinationOffset: gapSamples,
+    })
+    expect(destination[gapSamples - 1]).toBe(0)
+    expect(destination[gapSamples]).toBeCloseTo(0.4)
+  })
+
+  it('places a clip that starts at timeline zero at sample zero', () => {
+    expect(
+      placedAudioTimelineMs({
+        timelineStartMs: 0,
+        sourceInMs: 0,
+        sampleTimestampSec: 0,
+      }),
+    ).toBe(0)
+    expect(timelineSampleOffset(0)).toBe(0)
+  })
+
+  it('meets consecutive clips without inserting or removing time', () => {
+    const firstEnd = placedAudioTimelineMs({
+      timelineStartMs: 0,
+      sourceInMs: 0,
+      sampleTimestampSec: 2,
+    })
+    const secondStart = placedAudioTimelineMs({
+      timelineStartMs: 2_000,
+      sourceInMs: 0,
+      sampleTimestampSec: 0,
+    })
+    expect(firstEnd).toBe(2_000)
+    expect(secondStart).toBe(firstEnd)
+  })
+
+  it('maps a trimmed source onto the timeline start', () => {
+    expect(
+      placedAudioTimelineMs({
+        timelineStartMs: 5_000,
+        sourceInMs: 2_000,
+        sampleTimestampSec: 2,
+      }),
+    ).toBe(5_000)
+    expect(
+      placedAudioTimelineMs({
+        timelineStartMs: 5_000,
+        sourceInMs: 2_000,
+        sampleTimestampSec: 2.5,
+      }),
+    ).toBe(5_500)
+  })
+
+  it('keeps silence between separated clips', () => {
+    const later = placedAudioTimelineMs({
+      timelineStartMs: 100,
+      sourceInMs: 1_500,
+      sampleTimestampSec: 1.5,
+    })
+    const destination = new Float32Array(timelineSampleOffset(later) + 1)
+    mixIntoTimeline({
+      destination,
+      source: new Float32Array([0.2]),
+      sourceRate: 48_000,
+      destinationRate: 48_000,
+      destinationOffset: timelineSampleOffset(0),
+    })
+    mixIntoTimeline({
+      destination,
+      source: new Float32Array([0.8]),
+      sourceRate: 48_000,
+      destinationRate: 48_000,
+      destinationOffset: timelineSampleOffset(later),
+    })
+    expect(destination[0]).toBeCloseTo(0.2)
+    expect(destination[1]).toBe(0)
+    expect(destination.at(-1)).toBeCloseTo(0.8)
+    expect(later).toBe(100)
   })
 })
 

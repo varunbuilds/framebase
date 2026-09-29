@@ -1,6 +1,6 @@
 import { getRouteApi } from '@tanstack/react-router'
 import { ChevronLeft, ChevronRight, Pause, Play, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   getPlaybackEndMs,
   resolvePlaybackAt,
@@ -99,16 +99,8 @@ export function PreviewPanel() {
   const lastAudibleVolumeRef = useRef(1)
   const [volume, setVolume] = useState(1)
   const [muted, setMuted] = useState(false)
-  useTimelinePlayback(mediaRef)
-
   const silent = muted || volume === 0
-
-  useEffect(() => {
-    const media = mediaRef.current
-    if (!media) return
-    media.volume = volume
-    media.muted = silent
-  }, [silent, volume])
+  useTimelinePlayback(mediaRef, { volume, muted: silent })
 
   const stepFrame = (frames: number) => {
     if (!canPlay) return

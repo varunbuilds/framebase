@@ -1,6 +1,10 @@
 /** Runtime-only object URL registry. Not part of the serializable document. */
 
-const objectUrls = new Map<string, string>()
+const hotData = import.meta.hot?.data as { objectUrls?: Map<string, string> } | undefined
+const objectUrls = hotData?.objectUrls ?? new Map<string, string>()
+if (import.meta.hot) {
+  import.meta.hot.data.objectUrls = objectUrls
+}
 
 export function setObjectUrl(mediaSourceId: string, url: string): void {
   const existing = objectUrls.get(mediaSourceId)

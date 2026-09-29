@@ -1,10 +1,15 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import {
+  audioClipsToPrepare,
+  audioPlayheadSeekSec,
   getPlaybackEndMs,
   nextPlayheadWhilePlaying,
+  resolveActiveVideoClip,
   resolvePlaybackAt,
   sourceToTimelineTimeMs,
+  stepPlayheadMs,
   timelineToSourceTimeMs,
+  videoSourceUsesEmbeddedAudio,
 } from '@/features/editor/playback'
 import { getObjectUrl } from '@/lib/media/object-urls'
 import { useEditorStore } from '@/stores/editor-store'
@@ -13,6 +18,154 @@ import type { EditorUiState } from '@/types/editor'
 import { msToSeconds, secondsToMs } from '@/utils/time'
 
 const SEEK_EPSILON_SEC = 0.05
+const AUDIO_DRIFT_SEC = 0.1
+
+type AudioSlot = {
+  clipId: string
+  url: string
+  element: HTMLAudioElement
+  /** Latest in-point or playhead the element should hold before it is playing. */
+  parkSec: number
+  /** Play after the in-flight seek only if the clip is still active. */
+  wantPlay: boolean
+}
+
+type PlaybackAudio = {
+  volume: number
+  muted: boolean
+}
+
+function releaseAudioSlot(slot: AudioSlot) {
+  slot.wantPlay = false
+  slot.element.pause()
+  slot.element.removeAttribute('src')
+  slot.element.load()
+}
+
+function playheadSound(args: {
+  media: HTMLMediaElement | null
+  pool: Map<string, AudioSlot>
+  document: ProjectDocument
+  playheadMs: number
+  playing: boolean
+  volume: number
+  muted: boolean
+}) {
+  applyVideoSound(args)
+  syncTimelineAudio(args)
+}
+
+function applyVideoSound(args: {
+  media: HTMLMediaElement | null
+  document: ProjectDocument
+  playheadMs: number
+  volume: number
+  muted: boolean
+}) {
+  if (!args.media) return
+  const video = resolveActiveVideoClip(args.document, args.playheadMs)
+  const carry =
+    video != null &&
+    videoSourceUsesEmbeddedAudio(args.document, video.clip.mediaSourceId)
+  args.media.volume = args.volume
+  args.media.muted = args.muted || !carry
+}
+
+function syncTimelineAudio(args: {
+  pool: Map<string, AudioSlot>
+  document: ProjectDocument
+  playheadMs: number
+  playing: boolean
+  volume: number
+  muted: boolean
+}) {
+  const cues = audioClipsToPrepare(args.document, args.playheadMs)
+  const keep = new Set<string>()
+
+  for (const cue of cues) {
+    const objectUrl = getObjectUrl(cue.mediaSourceId)
+    if (!objectUrl) {
+      const stale = args.pool.get(cue.clipId)
+      if (stale) {
+        releaseAudioSlot(stale)
+        args.pool.delete(cue.clipId)
+      }
+      continue
+    }
+    keep.add(cue.clipId)
+
+    let slot = args.pool.get(cue.clipId)
+    if (!slot || slot.url !== objectUrl) {
+      if (slot) releaseAudioSlot(slot)
+      const element = document.createElement('audio')
+      element.preload = 'auto'
+      const created: AudioSlot = {
+        clipId: cue.clipId,
+        url: objectUrl,
+        element,
+        parkSec: cue.parkSourceMs / 1000,
+        wantPlay: false,
+      }
+      element.src = objectUrl
+      element.addEventListener(
+        'loadedmetadata',
+        () => {
+          element.currentTime = created.parkSec
+        },
+        { once: true },
+      )
+      element.load()
+      slot = created
+      args.pool.set(cue.clipId, slot)
+    }
+
+    slot.parkSec = cue.parkSourceMs / 1000
+    slot.wantPlay = args.playing && cue.active
+    const element = slot.element
+    element.volume = args.volume
+    element.muted = args.muted
+    if (element.readyState < 1) continue
+
+    const targetSec = slot.parkSec
+    const sourceInSec = cue.sourceInMs / 1000
+    if (slot.wantPlay) {
+      if (element.paused) {
+        if (element.seeking) continue
+        const seekSec = audioPlayheadSeekSec({
+          currentSec: element.currentTime,
+          sourceInSec,
+          targetSec,
+        })
+        if (seekSec != null) {
+          element.currentTime = seekSec
+          element.addEventListener(
+            'seeked',
+            () => {
+              if (slot.wantPlay) void element.play().catch(() => undefined)
+            },
+            { once: true },
+          )
+        } else if (element.readyState >= 2) {
+          void element.play().catch(() => undefined)
+        }
+      } else if (element.currentTime - targetSec < -AUDIO_DRIFT_SEC) {
+        element.currentTime = targetSec
+      }
+      continue
+    }
+
+    if (!element.paused) element.pause()
+    if (Math.abs(element.currentTime - targetSec) > SEEK_EPSILON_SEC) {
+      element.currentTime = targetSec
+    }
+  }
+
+  for (const [clipId, slot] of args.pool) {
+    if (keep.has(clipId)) continue
+    releaseAudioSlot(slot)
+    args.pool.delete(clipId)
+  }
+}
 
 type PausedSyncSnapshot = {
   document: ProjectDocument
@@ -57,6 +210,7 @@ export function pausedPreviewStep(args: {
  */
 export function useTimelinePlayback(
   mediaRef: RefObject<HTMLMediaElement | null>,
+  audio: PlaybackAudio = { volume: 1, muted: false },
 ) {
   const document = useEditorStore((state) => state.document)
   const isPlaying = useEditorStore((state) => state.ui.isPlaying)
@@ -65,6 +219,7 @@ export function useTimelinePlayback(
   const setPlaybackError = useEditorStore((state) => state.setPlaybackError)
 
   const attachedMediaIdRef = useRef<string | null>(null)
+  const attachedUrlRef = useRef<string | null>(null)
   const attachedClipIdRef = useRef<string | null>(null)
   const pendingSeekSecRef = useRef<number | null>(null)
   const rafRef = useRef<number | null>(null)
@@ -75,6 +230,9 @@ export function useTimelinePlayback(
   const appliedSeekVersionRef = useRef(
     useEditorStore.getState().ui.seekVersion,
   )
+  const audioPoolRef = useRef(new Map<string, AudioSlot>())
+  const volumeRef = useRef(audio.volume)
+  const userMutedRef = useRef(audio.muted)
 
   useEffect(() => {
     isPlayingRef.current = isPlaying
@@ -83,6 +241,32 @@ export function useTimelinePlayback(
   useEffect(() => {
     documentRef.current = document
   }, [document])
+
+  useEffect(() => {
+    volumeRef.current = audio.volume
+    userMutedRef.current = audio.muted
+    playheadSound({
+      media: mediaRef.current,
+      pool: audioPoolRef.current,
+      document: documentRef.current,
+      playheadMs: playheadRef.current,
+      playing: isPlayingRef.current,
+      volume: audio.volume,
+      muted: audio.muted,
+    })
+  }, [audio.muted, audio.volume, mediaRef])
+
+  useEffect(() => {
+    const pool = audioPoolRef.current
+    return () => {
+      for (const slot of pool.values()) {
+        slot.element.pause()
+        slot.element.removeAttribute('src')
+        slot.element.load()
+      }
+      pool.clear()
+    }
+  }, [])
 
   // Paused seeks update the element through a store subscription so the
   // playback clock does not rerender this hook's parent every frame.
@@ -93,9 +277,19 @@ export function useTimelinePlayback(
     const syncPaused = () => {
       const { document: doc, ui } = useEditorStore.getState()
       playheadRef.current = ui.playheadMs
-      if (ui.isPlaying) return
-
+      documentRef.current = doc
       const media = mediaRef.current
+      if (ui.isPlaying) return
+      playheadSound({
+        media,
+        pool: audioPoolRef.current,
+        document: doc,
+        playheadMs: ui.playheadMs,
+        playing: false,
+        volume: volumeRef.current,
+        muted: userMutedRef.current,
+      })
+
       const resolution = resolvePlaybackAt(doc, ui.playheadMs)
       const objectUrl =
         resolution.status === 'clip' ? getObjectUrl(resolution.mediaSourceId) : undefined
@@ -113,17 +307,38 @@ export function useTimelinePlayback(
         return
       }
 
+      const targetSec = msToSeconds(resolution.sourceTimeMs)
       const applyCurrentTime = () => {
-        media.currentTime = msToSeconds(resolution.sourceTimeMs)
+        if (Math.abs(media.currentTime - targetSec) > SEEK_EPSILON_SEC) {
+          media.currentTime = targetSec
+        }
       }
+      const sourceIsCurrent =
+        attachedMediaIdRef.current === resolution.mediaSourceId &&
+        attachedUrlRef.current === objectUrl &&
+        media.error == null &&
+        media.src.length > 0
 
-      if (attachedMediaIdRef.current !== resolution.mediaSourceId) {
+      if (!sourceIsCurrent) {
         detachLoaded?.()
         attachedMediaIdRef.current = resolution.mediaSourceId
+        attachedUrlRef.current = objectUrl
         attachedClipIdRef.current = resolution.clip.id
+        pendingSeekSecRef.current = targetSec
         media.src = objectUrl
         const onLoaded = () => {
-          applyCurrentTime()
+          pendingSeekSecRef.current = null
+          const live = resolvePlaybackAt(
+            useEditorStore.getState().document,
+            playheadRef.current,
+          )
+          const seekSec =
+            live.status === 'clip' && live.clip.id === resolution.clip.id
+              ? msToSeconds(live.sourceTimeMs)
+              : targetSec
+          if (Math.abs(media.currentTime - seekSec) > SEEK_EPSILON_SEC) {
+            media.currentTime = seekSec
+          }
         }
         media.addEventListener('loadedmetadata', onLoaded, { once: true })
         detachLoaded = () => {
@@ -133,11 +348,10 @@ export function useTimelinePlayback(
         return
       }
 
+      attachedClipIdRef.current = resolution.clip.id
+      pendingSeekSecRef.current = null
       if (media.readyState >= 1) {
-        const targetSec = msToSeconds(resolution.sourceTimeMs)
-        if (Math.abs(media.currentTime - targetSec) > SEEK_EPSILON_SEC) {
-          applyCurrentTime()
-        }
+        applyCurrentTime()
       }
     }
 
@@ -179,10 +393,14 @@ export function useTimelinePlayback(
       lastFrameTsRef.current = null
       const media = mediaRef.current
       if (media && !media.paused) media.pause()
+      for (const slot of audioPoolRef.current.values()) {
+        if (!slot.element.paused) slot.element.pause()
+      }
       return
     }
 
     let cancelled = false
+    let playbackStartFailed = false
 
     const onMediaError = () => {
       setPlaybackError('Playback failed while reading the media file.')
@@ -225,11 +443,17 @@ export function useTimelinePlayback(
       const objectUrl = getObjectUrl(mediaSourceId)
       if (!objectUrl) return null
 
-      const sameSource = attachedMediaIdRef.current === mediaSourceId
+      const sameSource =
+        attachedMediaIdRef.current === mediaSourceId &&
+        attachedUrlRef.current === objectUrl &&
+        mediaEl.error == null &&
+        mediaEl.src.length > 0
       const sameClip = attachedClipIdRef.current === clipId
 
       if (!sameSource) {
+        playbackStartFailed = false
         attachedMediaIdRef.current = mediaSourceId
+        attachedUrlRef.current = objectUrl
         attachedClipIdRef.current = clipId
         pendingSeekSecRef.current = msToSeconds(sourceTimeMs)
         mediaEl.src = objectUrl
@@ -244,8 +468,9 @@ export function useTimelinePlayback(
               ? msToSeconds(live.sourceTimeMs)
               : msToSeconds(sourceTimeMs)
           requestSeek(mediaEl, targetSec)
-          if (isPlayingRef.current) {
+          if (isPlayingRef.current && mediaEl.paused) {
             void mediaEl.play().catch(() => {
+              playbackStartFailed = true
               setPlaybackError('Browser blocked or failed media playback.')
             })
           }
@@ -303,6 +528,15 @@ export function useTimelinePlayback(
         attachedMediaIdRef.current = null
         pendingSeekSecRef.current = null
       }
+      playheadSound({
+        media: mediaRef.current,
+        pool: audioPoolRef.current,
+        document: doc,
+        playheadMs: timeMs,
+        playing: true,
+        volume: volumeRef.current,
+        muted: userMutedRef.current,
+      })
       const resolution = resolvePlaybackAt(doc, timeMs)
 
       if (resolution.status === 'ended' || timeMs >= endMs) {
@@ -321,9 +555,18 @@ export function useTimelinePlayback(
         const mediaEl = mediaRef.current
         if (mediaEl && !mediaEl.paused) mediaEl.pause()
 
-        timeMs = Math.min(endMs, timeMs + deltaMs)
+        timeMs = stepPlayheadMs(timeMs, deltaMs, endMs)
         playheadRef.current = timeMs
         setPlayheadMs(timeMs)
+        playheadSound({
+        media: mediaRef.current,
+        pool: audioPoolRef.current,
+        document: doc,
+        playheadMs: timeMs,
+        playing: true,
+        volume: volumeRef.current,
+        muted: userMutedRef.current,
+      })
 
         if (timeMs >= endMs) {
           pause()
@@ -342,9 +585,18 @@ export function useTimelinePlayback(
       )
 
       if (!bound || !getObjectUrl(resolution.mediaSourceId)) {
-        timeMs = Math.min(endMs, timeMs + deltaMs)
+        timeMs = stepPlayheadMs(timeMs, deltaMs, endMs)
         playheadRef.current = timeMs
         setPlayheadMs(timeMs)
+        playheadSound({
+        media: mediaRef.current,
+        pool: audioPoolRef.current,
+        document: doc,
+        playheadMs: timeMs,
+        playing: true,
+        volume: volumeRef.current,
+        muted: userMutedRef.current,
+      })
         rafRef.current = requestAnimationFrame(tick)
         return
       }
@@ -362,8 +614,15 @@ export function useTimelinePlayback(
         }
       }
 
-      if (mediaEl.paused && mediaEl.readyState >= 2 && pendingSeekSecRef.current == null) {
+      if (
+        !playbackStartFailed &&
+        mediaEl.paused &&
+        mediaEl.readyState >= 2 &&
+        pendingSeekSecRef.current == null &&
+        mediaTimeIsReady(mediaEl)
+      ) {
         void mediaEl.play().catch(() => {
+          playbackStartFailed = true
           setPlaybackError('Browser blocked or failed media playback.')
         })
       }
@@ -388,6 +647,15 @@ export function useTimelinePlayback(
 
       playheadRef.current = timeMs
       setPlayheadMs(timeMs)
+      playheadSound({
+        media: mediaRef.current,
+        pool: audioPoolRef.current,
+        document: doc,
+        playheadMs: timeMs,
+        playing: true,
+        volume: volumeRef.current,
+        muted: userMutedRef.current,
+      })
 
       if (timeMs >= endMs) {
         pause()

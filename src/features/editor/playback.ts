@@ -1,4 +1,4 @@
-import type { Clip, ProjectDocument, TimeMs, Track } from '@/types/timeline'
+import type { Clip, MediaSource, ProjectDocument, TimeMs, Track } from '@/types/timeline'
 import { getClipPlaybackRange } from '@/features/editor/operations'
 import {
   getClipsForTrack,
@@ -33,15 +33,19 @@ export function resolvePlaybackTrack(
   )
 }
 
-/** End of picture playback: the latest video clip, or the audio fallback track. */
+/**
+ * End of timeline playback. Video and audio clips both count, so a strip
+ * that continues after the picture still plays. One track's end is used
+ * only when a track id is passed.
+ */
 export function getPlaybackEndMs(
   document: ProjectDocument,
   trackId?: string,
 ): TimeMs {
-  if (!trackId && document.tracks.some((track) => track.kind === 'video')) {
+  if (!trackId) {
     let end: TimeMs = 0
     for (const track of document.tracks) {
-      if (track.kind !== 'video') continue
+      if (track.kind !== 'video' && track.kind !== 'audio') continue
       for (const clip of getClipsForTrack(document, track.id)) {
         end = Math.max(end, getClipPlaybackRange(clip).timelineEndMs)
       }
@@ -295,9 +299,22 @@ export function advanceThroughGap(
 }
 
 /**
+ * Wall-clock step for the playhead. Gaps, clip boundaries, and media that is
+ * still loading do not change this. The media element seeks to the playhead.
+ */
+export function stepPlayheadMs(
+  playheadMs: TimeMs,
+  deltaMs: TimeMs,
+  playbackEndMs: TimeMs,
+): TimeMs {
+  return Math.min(playbackEndMs, playheadMs + Math.max(0, deltaMs))
+}
+
+/**
  * Playhead step while the timeline is playing.
  * A media clock that jumps backward — typical when a cut seeks the element
- * to the clip boundary — is ignored so the playhead does not snap back to the cut.
+ * to the clip boundary — is ignored so the playhead does not snap back to
+ * the start of the clip it just entered.
  */
 export function nextPlayheadWhilePlaying(args: {
   playheadMs: TimeMs
@@ -305,11 +322,135 @@ export function nextPlayheadWhilePlaying(args: {
   mediaTimelineMs: TimeMs | null
   playbackEndMs: TimeMs
 }): TimeMs {
-  const stepped = args.playheadMs + Math.max(0, args.deltaMs)
+  const stepped = stepPlayheadMs(args.playheadMs, args.deltaMs, args.playbackEndMs)
   const media = args.mediaTimelineMs
-  const trusted =
-    media != null && media + 2 >= args.playheadMs ? media : stepped
-  return Math.min(args.playbackEndMs, Math.max(args.playheadMs, trusted))
+  if (media == null || media + 2 < args.playheadMs) return stepped
+  return Math.min(args.playbackEndMs, Math.max(args.playheadMs, media))
+}
+
+/**
+ * How far ahead an audio element is loaded and parked at its in-point.
+ * The timeline clock does not wait for that load.
+ */
+export const AUDIO_PRELOAD_LEAD_MS = 10_000
+
+export type TimelineAudioItem = {
+  clip: Clip
+  source: MediaSource
+}
+
+/**
+ * Audible timeline audio, independent of which video clip is showing.
+ *
+ * Audio tracks are authoritative. Every unmuted audio-track clip is mixed at
+ * its own timeline interval. Track.order does not choose among them, and a
+ * clip does not have to sit beside a video clip.
+ *
+ * A video file's embedded audio is included only when no audio-track clip
+ * refers to that same media source. A muted audio track still counts, so
+ * muting it does not fall back to the video file.
+ */
+export function collectTimelineAudio(document: ProjectDocument): {
+  representedSourceIds: ReadonlySet<string>
+  audibleAudioClips: TimelineAudioItem[]
+  embeddedVideoClips: TimelineAudioItem[]
+} {
+  const representedSourceIds = new Set<string>()
+  const audibleAudioClips: TimelineAudioItem[] = []
+  const embeddedVideoClips: TimelineAudioItem[] = []
+
+  for (const clip of document.clips) {
+    const track = document.tracks.find((item) => item.id === clip.trackId)
+    if (!track || track.kind !== 'audio') continue
+    const source = getMediaSourceById(document, clip.mediaSourceId)
+    if (!source?.hasAudio) continue
+    representedSourceIds.add(source.id)
+    if (!track.muted) audibleAudioClips.push({ clip, source })
+  }
+
+  for (const clip of document.clips) {
+    const track = document.tracks.find((item) => item.id === clip.trackId)
+    if (!track || track.kind !== 'video') continue
+    const source = getMediaSourceById(document, clip.mediaSourceId)
+    if (!source?.hasAudio || representedSourceIds.has(source.id)) continue
+    embeddedVideoClips.push({ clip, source })
+  }
+
+  return { representedSourceIds, audibleAudioClips, embeddedVideoClips }
+}
+
+/** The video element may emit this file's audio. An audio-track clip of the same source owns it instead. */
+export function videoSourceUsesEmbeddedAudio(
+  document: ProjectDocument,
+  mediaSourceId: string,
+): boolean {
+  const source = getMediaSourceById(document, mediaSourceId)
+  if (!source?.hasAudio) return false
+  return !collectTimelineAudio(document).representedSourceIds.has(mediaSourceId)
+}
+
+export type AudioCue = {
+  clipId: string
+  mediaSourceId: string
+  timelineStartMs: TimeMs
+  sourceInMs: TimeMs
+  sourceOutMs: TimeMs
+  /** Clip contains the playhead. Otherwise the element is only being warmed up. */
+  active: boolean
+  /**
+   * Source time a paused element should hold.
+   * Active clips park at the playhead. Upcoming clips park at their in-point.
+   */
+  parkSourceMs: TimeMs
+}
+
+/**
+ * Audio elements the preview should hold at this playhead.
+ * Active clips are playing or cued. Upcoming clips inside the lead are loaded
+ * and parked at sourceIn so entering them does not wait on a new source.
+ */
+export function audioClipsToPrepare(
+  document: ProjectDocument,
+  playheadMs: TimeMs,
+  leadMs: TimeMs = AUDIO_PRELOAD_LEAD_MS,
+): AudioCue[] {
+  const timeMs = Math.max(0, Math.round(playheadMs))
+  const lead = Math.max(0, leadMs)
+  const cues: AudioCue[] = []
+
+  for (const { clip } of collectTimelineAudio(document).audibleAudioClips) {
+    const { timelineEndMs } = getClipPlaybackRange(clip)
+    if (timelineEndMs <= timeMs) continue
+    const active = isTimelineTimeInClip(clip, timeMs)
+    const upcoming = !active && clip.timelineStartMs - timeMs <= lead
+    if (!active && !upcoming) continue
+    cues.push({
+      clipId: clip.id,
+      mediaSourceId: clip.mediaSourceId,
+      timelineStartMs: clip.timelineStartMs,
+      sourceInMs: clip.sourceInMs,
+      sourceOutMs: clip.sourceOutMs,
+      active,
+      parkSourceMs: active ? sourceTimeForClip(clip, timeMs) : clip.sourceInMs,
+    })
+  }
+
+  return cues
+}
+
+/**
+ * Where to put an audio element that is about to play.
+ * An element already parked on the clip in-point stays there, so the start
+ * of the clip is heard instead of skipped to the live playhead.
+ */
+export function audioPlayheadSeekSec(args: {
+  currentSec: number
+  sourceInSec: number
+  targetSec: number
+}): number | null {
+  if (Math.abs(args.currentSec - args.sourceInSec) <= 0.08) return null
+  if (Math.abs(args.currentSec - args.targetSec) <= 0.08) return null
+  return args.targetSec
 }
 
 export function findNextClipStartMs(
