@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import hero from '@/assets/hero.png'
 import logo from '@/assets/framebase-logo.png'
+import { FeatureFrames } from '@/components/landing/FeatureFrames'
 import { useAuth } from '@/features/auth/use-auth'
 import { formatTimecode } from '@/utils/time'
 
@@ -25,7 +26,6 @@ const SECTIONS = [
   {
     id: 'features',
     label: 'Features',
-    body: 'A project holds the timeline, the media, and the cut. Import a file, place the clips, and keep working locally.',
   },
   {
     id: 'team',
@@ -182,6 +182,8 @@ export function LandingPage() {
       <div className="landing-grain" aria-hidden="true" />
       <div className="landing-edge landing-edge-left" aria-hidden="true" />
       <div className="landing-edge landing-edge-right" aria-hidden="true" />
+      <div className="landing-edge-fade landing-edge-fade-left" aria-hidden="true" />
+      <div className="landing-edge-fade landing-edge-fade-right" aria-hidden="true" />
       <div className="landing-corners" aria-hidden="true">
         <span className="landing-corner landing-corner-tl" />
         <span className="landing-corner landing-corner-tr" />
@@ -248,6 +250,15 @@ export function LandingPage() {
                   </span>
                 ))}
               </div>
+            </section>
+          ) : section.id === 'features' ? (
+            <section
+              key={section.id}
+              className="landing-section landing-features"
+              aria-labelledby={`landing-${section.id}`}
+            >
+              <h1 id={`landing-${section.id}`}>{section.label}</h1>
+              <FeatureFrames />
             </section>
           ) : (
             <section key={section.id} className="landing-section" aria-labelledby={`landing-${section.id}`}>
