@@ -1,7 +1,8 @@
 import { Link } from '@tanstack/react-router'
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import hero from '@/assets/hero.png'
 import logo from '@/assets/framebase-logo.png'
+import profile from '@/assets/profile.png'
 import { FeatureFrames } from '@/components/landing/FeatureFrames'
 import { useAuth } from '@/features/auth/use-auth'
 import { formatTimecode } from '@/utils/time'
@@ -18,6 +19,44 @@ const PRESENCE = [
   { name: 'Marc', color: '#ff6f93', top: '22%', left: '12%', delay: '-4.6s' },
 ] as const
 
+const FAQ = [
+  {
+    n: '01',
+    question: 'What is Framebase?',
+    answer:
+      'Framebase is a browser-based video editor built for collaborative editing. Create, edit and work on video projects together, all from one shared workspace.',
+  },
+  {
+    n: '02',
+    question: 'Can multiple people edit the same project?',
+    answer:
+      'Yes! Framebase supports real-time collaboration, letting multiple people work in the same project, see each other’s cursors and follow editing changes as they happen.',
+  },
+  {
+    n: '03',
+    question: 'Do I need to install anything?',
+    answer:
+      'No. Framebase runs directly in your web browser, so you can start editing without downloading or installing a desktop application.',
+  },
+  {
+    n: '04',
+    question: 'Can I import my own video and audio files?',
+    answer:
+      'Absolutely. Import your own footage and audio files into your project and arrange them on the timeline to create your edits.',
+  },
+  {
+    n: '05',
+    question: 'Can I export my finished videos?',
+    answer: 'Yes. Export your finished projects as MP4 files directly from your browser.',
+  },
+  {
+    n: '06',
+    question: 'Where are my projects and media stored?',
+    answer:
+      'Your project data is synchronized through the cloud, while original media files are stored in your selected local workspace and can be synchronized through cloud storage.',
+  },
+] as const
+
 const SECTIONS = [
   {
     id: 'about',
@@ -28,16 +67,95 @@ const SECTIONS = [
     label: 'Features',
   },
   {
-    id: 'team',
-    label: 'Team',
-    body: 'The committed timeline is what the room shares. A drag stays on your machine until you release it.',
+    id: 'faq',
+    label: 'FAQ',
   },
   {
-    id: 'services',
-    label: 'Services',
-    body: 'Play through the timeline, step across gaps, and export an MP4 from the browser.',
+    id: 'feedback',
+    label: 'Feedback',
   },
 ] as const
+
+const SECTION_TITLES = SECTIONS.map((section) => (section.id === 'about' ? 'Framebase' : section.label))
+
+function FaqList() {
+  const [open, setOpen] = useState<string>(FAQ[0].n)
+
+  return (
+    <div className="landing-faq-list">
+      {FAQ.map((item) => {
+        const isOpen = open === item.n
+        return (
+          <div key={item.n}>
+            <button
+              type="button"
+              className="landing-faq-question"
+              aria-expanded={isOpen}
+              onClick={() => setOpen(isOpen ? '' : item.n)}
+            >
+              <span>{item.n}</span>
+              {item.question}
+            </button>
+            <div className={isOpen ? 'landing-faq-answer is-open' : 'landing-faq-answer'}>
+              <p>{item.answer}</p>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function FeedbackSection({ headingId }: { headingId: string }) {
+  const [note, setNote] = useState('')
+  const [ready, setReady] = useState(false)
+
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const text = note.trim()
+    if (!text) return
+    const url = new URL('https://github.com/varunbuilds/framebase/issues/new')
+    url.searchParams.set('title', 'Landing feedback')
+    url.searchParams.set('body', text)
+    window.open(url, '_blank', 'noopener,noreferrer')
+    setReady(true)
+  }
+
+  return (
+    <section className="landing-section landing-close" aria-labelledby={headingId}>
+      
+      <h1 id={headingId}>
+        Feedback 
+      </h1>
+      <form className="landing-feedback" onSubmit={onSubmit}>
+        <label htmlFor="landing-feedback-note">A note</label>
+        <textarea
+          id="landing-feedback-note"
+          name="note"
+          rows={4}
+          required
+          value={note}
+          placeholder="What should change?"
+          onChange={(event) => {
+            setNote(event.target.value)
+            setReady(false)
+          }}
+        />
+        <button type="submit">Send</button>
+        {ready ? <p>Your note is ready in a new GitHub issue.</p> : null}
+      </form>
+      <footer className="landing-close-foot">
+        <p className="landing-credit">
+          Made by
+          <a href="https://varunrewadi.com" target="_blank" rel="noreferrer">
+            <img src={profile} alt="" />
+            <span>Varun</span>
+          </a>
+        </p>
+      </footer>
+    </section>
+  )
+}
 
 export function LandingPage() {
   const { status } = useAuth()
@@ -81,14 +199,24 @@ export function LandingPage() {
       strip.scrollTo({ left, behavior: 'smooth' })
     }
     const onWheel = (event: WheelEvent) => {
-      if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+      const list = event.target instanceof Element ? event.target.closest('.landing-faq-list') : null
+      const overFaq = list instanceof HTMLElement
+      const horizontal = event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)
+      if (overFaq && !horizontal) {
+        const room = list.scrollHeight - list.clientHeight
+        const atTop = list.scrollTop <= 0
+        const atBottom = list.scrollTop >= room - 1
+        if (room > 1 && ((event.deltaY > 0 && !atBottom) || (event.deltaY < 0 && !atTop))) return
+      }
+      if (!overFaq && horizontal) {
         window.clearTimeout(snapTimer)
         strip.style.scrollSnapType = ''
         return
       }
-      if (event.deltaY === 0) return
+      const raw = horizontal ? event.deltaX : event.deltaY
+      if (raw === 0) return
       event.preventDefault()
-      let delta = event.deltaY
+      let delta = raw
       if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 40
       else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= strip.clientWidth
       strip.style.scrollSnapType = 'none'
@@ -140,6 +268,8 @@ export function LandingPage() {
     let dragging = false
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return
+      const target = event.target
+      if (target instanceof Element && target.closest('button, a, input, textarea, label')) return
       dragging = true
       dragX = event.clientX
       dragScroll = strip.scrollLeft
@@ -167,7 +297,56 @@ export function LandingPage() {
     }
   }, [])
 
-  const activeLink = Math.round(progress * (SECTIONS.length - 1))
+  const sectionOffset = progress * (SECTIONS.length - 1)
+  const activeLink = Math.round(sectionOffset)
+  const reduceMotion =
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const titleOffset = reduceMotion ? activeLink : sectionOffset
+  const wordmarkWindowRef = useRef<HTMLSpanElement>(null)
+  const wordmarkTrackRef = useRef<HTMLSpanElement>(null)
+  const [titleGap, setTitleGap] = useState(0)
+  const [titleFrame, setTitleFrame] = useState(0)
+  const [titleCenters, setTitleCenters] = useState<number[]>([])
+
+  useLayoutEffect(() => {
+    const frame = wordmarkWindowRef.current
+    const track = wordmarkTrackRef.current
+    if (!frame || !track) return
+
+    const measure = () => {
+      const items = Array.from(track.children)
+      const widths = items.map((item) => item.getBoundingClientRect().width)
+      const widest = widths.reduce((max, width) => Math.max(max, width), 0)
+      const otherGaps = [1, 2]
+        .map((index) => widest - ((widths[index] ?? widest) + (widths[index + 1] ?? widest)) / 2)
+        .filter((gap) => Number.isFinite(gap))
+      const nextGap =
+        otherGaps.length === 0 ? 0 : otherGaps.reduce((sum, gap) => sum + gap, 0) / otherGaps.length
+      setTitleGap((current) => (Math.abs(current - nextGap) < 0.5 ? current : Math.max(0, nextGap)))
+      const origin = track.getBoundingClientRect().left
+      const centers = items.map((item) => {
+        const box = item.getBoundingClientRect()
+        return box.left - origin + box.width / 2
+      })
+      setTitleCenters((current) =>
+        current.length === centers.length && current.every((value, index) => Math.abs(value - (centers[index] ?? value)) < 0.5)
+          ? current
+          : centers,
+      )
+      setTitleFrame((current) => (Math.abs(current - frame.clientWidth) < 0.5 ? current : frame.clientWidth))
+    }
+
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(frame)
+    return () => observer.disconnect()
+  }, [titleGap])
+
+  const titleIndex = Math.min(Math.max(0, titleCenters.length - 1), Math.max(0, Math.floor(titleOffset)))
+  const titleBlend = titleOffset - titleIndex
+  const titleFrom = titleCenters[titleIndex] ?? 0
+  const titleTo = titleCenters[titleIndex + 1] ?? titleFrom
+  const titleShift = titleFrame / 2 - (titleFrom + (titleTo - titleFrom) * titleBlend)
 
   const scrollToLink = (index: number) => {
     const strip = stripRef.current
@@ -193,7 +372,29 @@ export function LandingPage() {
 
       <header className="landing-header">
         <img className="landing-mark" src={logo} alt="" />
-        <p>FRAMEBASE</p>
+        <p className="landing-wordmark">
+          <span className="landing-wordmark-live" aria-live="polite">
+            {SECTION_TITLES[activeLink]}
+          </span>
+          <span ref={wordmarkWindowRef} className="landing-wordmark-window" aria-hidden="true">
+            <span className="landing-wordmark-sizers">
+              {SECTION_TITLES.map((title) => (
+                <span key={title}>{title}</span>
+              ))}
+            </span>
+            <span
+              ref={wordmarkTrackRef}
+              className="landing-wordmark-track"
+              style={{ gap: titleGap, transform: `translate3d(${titleShift}px, 0, 0)` }}
+            >
+              {SECTION_TITLES.map((title) => (
+                <span key={title} className="landing-wordmark-item">
+                  {title}
+                </span>
+              ))}
+            </span>
+          </span>
+        </p>
         <div className="landing-contact">
           {signedIn ? (
             <Link to="/projects" className="landing-contact-link">
@@ -251,6 +452,15 @@ export function LandingPage() {
                 ))}
               </div>
             </section>
+          ) : section.id === 'faq' ? (
+            <section
+              key={section.id}
+              className="landing-section landing-faq"
+              aria-labelledby={`landing-${section.id}`}
+            >
+              <h1 id={`landing-${section.id}`}>{section.label}</h1>
+              <FaqList />
+            </section>
           ) : section.id === 'features' ? (
             <section
               key={section.id}
@@ -261,10 +471,7 @@ export function LandingPage() {
               <FeatureFrames />
             </section>
           ) : (
-            <section key={section.id} className="landing-section" aria-labelledby={`landing-${section.id}`}>
-              <h1 id={`landing-${section.id}`}>{section.label}</h1>
-              <p>{section.body}</p>
-            </section>
+            <FeedbackSection key={section.id} headingId={`landing-${section.id}`} />
           ),
         )}
       </div>

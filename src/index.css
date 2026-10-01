@@ -347,11 +347,53 @@ html.media-dragging * {
 }
 
 .landing-wordmark {
+  position: relative;
   margin: 0;
-  font-size: 16px;
   font-weight: 700;
-  letter-spacing: 0.42em;
-  text-indent: 0.42em;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  text-transform: uppercase;
+}
+
+.landing-wordmark-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.landing-wordmark-window {
+  position: relative;
+  display: block;
+  overflow: hidden;
+}
+
+.landing-wordmark-sizers {
+  display: grid;
+}
+
+.landing-wordmark-sizers > span {
+  grid-area: 1 / 1;
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+.landing-wordmark-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.landing-wordmark-item {
+  white-space: nowrap;
 }
 
 .landing-contact {
@@ -412,6 +454,267 @@ html.media-dragging * {
   font-size: 16px;
   line-height: 1.55;
   letter-spacing: 0;
+}
+
+.landing-faq {
+  height: 100%;
+  gap: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12vw;
+  overflow: hidden;
+  text-align: left;
+}
+
+.landing-faq h1 {
+  flex: none;
+  font-size: clamp(28px, 3vw, 42px);
+  text-align: center;
+}
+
+.landing-faq-list {
+  display: grid;
+  flex: 0 1 auto;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  align-content: start;
+  width: min(680px, 100%);
+  max-height: 100%;
+  min-height: 0;
+  margin: 0 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 12px;
+  scrollbar-width: thin;
+}
+
+.landing-faq-list > div {
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.landing-faq-question {
+  display: flex;
+  align-items: baseline;
+  width: 100%;
+  margin: 0;
+  padding: 16px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+
+.landing-faq-question span {
+  margin-right: 10px;
+  color: rgba(243, 244, 244, 0.45);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+}
+
+.landing-faq-answer {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 320ms cubic-bezier(0.22, 0.8, 0.32, 1);
+}
+
+.landing-faq-answer.is-open {
+  grid-template-rows: 1fr;
+}
+
+.landing-faq-list p {
+  min-height: 0;
+  max-width: none;
+  margin: 0;
+  overflow: hidden;
+  color: rgba(243, 244, 244, 0.72);
+  font-size: 15px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+
+.landing-faq-answer.is-open p {
+  padding-bottom: 16px;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-faq-answer,
+  .landing-faq-list p {
+    transition: none;
+  }
+}
+
+.landing-close {
+  gap: 18px;
+  justify-content: center;
+  padding: 0 12vw 12px;
+  text-align: left;
+}
+
+.landing-close-index {
+  margin: 0;
+  color: rgba(243, 244, 244, 0.45);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+}
+
+.landing-close h1 {
+  font-size: clamp(32px, 4vw, 56px);
+}
+
+.landing-close h1 span {
+  color: rgba(243, 244, 244, 0.55);
+}
+
+.landing-feedback {
+  display: grid;
+  gap: 10px;
+  width: min(520px, 100%);
+}
+
+.landing-feedback label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.landing-feedback textarea {
+  width: 100%;
+  min-height: 128px;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f4f4f4;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  resize: vertical;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.landing-feedback textarea:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.landing-feedback textarea:focus-visible {
+  border-color: #3f82c7;
+  background: rgba(63, 130, 199, 0.08);
+}
+
+.landing-feedback textarea::placeholder {
+  color: rgba(243, 244, 244, 0.38);
+}
+
+.landing-feedback button {
+  justify-self: start;
+  margin-top: 4px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: #3f82c7;
+  color: #f4f4f4;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.landing-feedback button:hover {
+  background: #4d92d6;
+}
+
+.landing-feedback button:active {
+  background: #356fad;
+}
+
+.landing-feedback p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.landing-close-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  align-items: baseline;
+  width: min(520px, 100%);
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.landing-close-foot p {
+  margin: 0;
+  color: rgba(243, 244, 244, 0.72);
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.landing-close-foot a {
+  color: #f4f4f4;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.landing-credit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.landing-credit a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(243, 244, 244, 0.72);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  transition: color 160ms ease;
+}
+
+.landing-credit a:hover {
+  color: #f4f4f4;
+}
+
+.landing-credit img {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.landing-credit span {
+  text-decoration: underline;
+  text-decoration-color: rgba(243, 244, 244, 0.38);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 160ms ease;
+}
+
+.landing-credit a:hover span {
+  text-decoration-color: #f4f4f4;
 }
 
 .landing-features {
