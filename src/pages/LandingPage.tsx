@@ -214,9 +214,10 @@ export function LandingPage() {
       let delta = raw
       if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 40
       else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= strip.clientWidth
+      window.clearTimeout(snapTimer)
       strip.style.scrollSnapType = 'none'
       strip.scrollLeft += delta
-      window.clearTimeout(snapTimer)
+      if (!horizontal) return
       snapTimer = window.setTimeout(settle, 120)
     }
 
