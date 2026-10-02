@@ -38,14 +38,14 @@ export function LoginPage() {
       footer={
         <>
           No account?{' '}
-          <Link to="/signup" search={{ redirect }} className="text-fb-text">
+          <Link to="/signup" search={{ redirect }} className="app-link">
             Create one
           </Link>
         </>
       }
     >
       <form className="flex flex-col gap-3" onSubmit={(event) => void onSubmit(event)}>
-        <label className="flex flex-col gap-1.5 text-[12px] text-fb-muted">
+        <label className="app-label flex flex-col gap-2">
           Email
           <input
             type="email"
@@ -56,7 +56,7 @@ export function LoginPage() {
             className={authFieldClass}
           />
         </label>
-        <label className="flex flex-col gap-1.5 text-[12px] text-fb-muted">
+        <label className="app-label flex flex-col gap-2">
           Password
           <input
             type="password"

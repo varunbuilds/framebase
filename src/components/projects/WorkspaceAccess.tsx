@@ -28,7 +28,7 @@ export function WorkspaceAccess() {
   const folder = workspace.folderName ?? 'this folder'
 
   return (
-    <section className="mb-8 rounded-lg border border-fb-border bg-fb-panel px-4 py-4">
+    <section className="app-panel mb-8 px-4 py-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-[13px] font-medium text-fb-text">Local workspace</h2>
@@ -72,7 +72,7 @@ export function WorkspaceAccess() {
             type="button"
             onClick={() => void choose()}
             disabled={pending}
-            className="h-8 rounded-md border border-fb-border px-3 text-[12px] text-fb-text hover:bg-white/[0.06] disabled:opacity-50"
+            className="app-btn-quiet disabled:opacity-50"
           >
             {pending ? 'Opening…' : 'Change'}
           </button>
@@ -82,7 +82,7 @@ export function WorkspaceAccess() {
               type="button"
               onClick={() => void reconnect()}
               disabled={pending}
-              className="h-8 rounded-md bg-white px-3 text-[12px] font-medium text-black disabled:opacity-50"
+              className="app-btn disabled:opacity-50"
             >
               {pending ? 'Opening…' : 'Reconnect'}
             </button>
@@ -91,7 +91,7 @@ export function WorkspaceAccess() {
                 type="button"
                 onClick={() => void choose()}
                 disabled={pending}
-                className="h-8 rounded-md border border-fb-border px-3 text-[12px] text-fb-text disabled:opacity-50"
+                className="app-btn-quiet disabled:opacity-50"
               >
                 Select workspace
               </button>
@@ -102,7 +102,7 @@ export function WorkspaceAccess() {
             type="button"
             onClick={() => void choose()}
             disabled={pending}
-            className="h-8 rounded-md bg-white px-3 text-[12px] font-medium text-black disabled:opacity-50"
+            className="app-btn disabled:opacity-50"
           >
             {pending ? 'Opening…' : 'Select workspace'}
           </button>

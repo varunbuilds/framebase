@@ -26,9 +26,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="w-full max-w-[380px] rounded-xl border border-fb-border bg-fb-panel p-5 shadow-2xl"
+        className="w-full max-w-[380px] border border-white/15 bg-[#0b1016] p-5"
       >
-        <h2 id={titleId} className="text-[16px] font-semibold text-fb-text">
+        <h2 id={titleId} className="text-[22px] font-bold tracking-[-0.04em] text-[#f4f4f4]">
           {job.status === 'complete'
             ? 'Export complete'
             : job.status === 'failed'
@@ -96,7 +96,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
             <button
               type="button"
               onClick={cancel}
-              className="h-8 rounded-md px-3 text-[13px] text-fb-muted hover:text-fb-text"
+              className="app-btn-quiet"
             >
               Cancel export
             </button>
@@ -105,14 +105,14 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               <button
                 type="button"
                 onClick={onClose}
-                className="mr-auto h-8 rounded-md px-3 text-[13px] text-fb-muted hover:text-fb-text"
+                className="app-btn-quiet mr-auto"
               >
                 Close
               </button>
               <button
                 type="button"
                 onClick={downloadAgain}
-                className="h-8 rounded-md bg-white px-3 text-[13px] font-medium text-black"
+                className="app-btn"
               >
                 Download
               </button>
@@ -125,14 +125,14 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   reset()
                   onClose()
                 }}
-                className="mr-auto h-8 rounded-md px-3 text-[13px] text-fb-muted hover:text-fb-text"
+                className="app-btn-quiet mr-auto"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={start}
-                className="h-8 rounded-md bg-white px-3 text-[13px] font-medium text-black"
+                className="app-btn"
               >
                 Export
               </button>

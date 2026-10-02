@@ -53,9 +53,9 @@ export function NewProjectDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="w-full max-w-[440px] rounded-lg border border-fb-border bg-fb-panel p-5 shadow-2xl"
+        className="w-full max-w-[440px] border border-white/15 bg-[#0b1016] p-5"
       >
-        <h2 id={titleId} className="text-[16px] font-semibold text-fb-text">
+        <h2 id={titleId} className="text-[22px] font-bold tracking-[-0.04em] text-[#f4f4f4]">
           New Project
         </h2>
         <form
@@ -65,7 +65,7 @@ export function NewProjectDialog({
             if (!creating) submit()
           }}
         >
-          <label htmlFor={nameId} className="text-[12px] text-fb-muted">
+          <label htmlFor={nameId} className="app-label">
             Project name
           </label>
           <input
@@ -75,7 +75,7 @@ export function NewProjectDialog({
             disabled={creating}
             onChange={(event) => setName(event.target.value)}
             onFocus={(event) => event.currentTarget.select()}
-            className="mt-1.5 h-9 w-full rounded-md border border-fb-border-strong bg-fb-surface px-3 text-[13px] text-fb-text outline-none"
+            className="app-field mt-2 h-11 px-3.5 disabled:opacity-50"
           />
 
           <p className="mt-5 text-[12px] text-fb-muted">Aspect ratio</p>
@@ -125,14 +125,14 @@ export function NewProjectDialog({
               type="button"
               onClick={onCancel}
               disabled={creating}
-              className="h-9 rounded-md px-3 text-[13px] text-fb-muted hover:text-fb-text disabled:opacity-50"
+              className="app-btn-quiet disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={creating}
-              className="h-9 rounded-md bg-white px-3 text-[13px] font-medium text-black disabled:opacity-50"
+              className="app-btn disabled:opacity-50"
             >
               {creating ? 'Creating…' : 'Create Project'}
             </button>

@@ -53,7 +53,7 @@ export function JoinPage() {
     <AuthScreen
       title={display === 'invalid' ? 'Link unavailable' : 'Join project'}
       footer={
-        <Link to="/projects" className="text-fb-text">
+        <Link to="/projects" className="app-link">
           Projects
         </Link>
       }
@@ -79,7 +79,7 @@ export function JoinPage() {
           <Link
             to="/signup"
             search={{ redirect }}
-            className="text-center text-[13px] text-fb-text no-underline"
+            className="text-center text-[13px] text-[#f4f4f4] no-underline"
           >
             Create account
           </Link>

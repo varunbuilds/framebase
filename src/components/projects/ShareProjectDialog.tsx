@@ -98,9 +98,9 @@ export function ShareProjectDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="w-full max-w-[440px] rounded-xl border border-fb-border bg-fb-panel p-5 shadow-2xl"
+        className="w-full max-w-[440px] border border-white/15 bg-[#0b1016] p-5"
       >
-        <h2 id={titleId} className="text-[16px] font-semibold text-fb-text">
+        <h2 id={titleId} className="text-[22px] font-bold tracking-[-0.04em] text-[#f4f4f4]">
           Share project
         </h2>
         <p className="mt-2 text-[13px] leading-relaxed text-fb-muted">
@@ -152,7 +152,7 @@ export function ShareProjectDialog({
             type="button"
             onClick={() => void create()}
             disabled={pending}
-            className="h-8 rounded-md bg-white px-3 text-[12px] font-medium text-black disabled:opacity-50"
+            className="app-btn disabled:opacity-50"
           >
             {pending ? 'Working…' : active || url ? 'Create new link' : 'Create link'}
           </button>

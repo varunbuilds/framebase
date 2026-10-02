@@ -1,24 +1,31 @@
 import { Link } from '@tanstack/react-router'
+import { AppChrome } from '@/components/layout/AppChrome'
 
 export function SessionLoading() {
   return (
-    <main className="grid h-dvh place-items-center bg-fb-app text-[13px] text-fb-muted">
-      Checking your session…
-    </main>
+    <AppChrome>
+      <main className="relative z-[1] grid h-dvh place-items-center text-[14px] text-[rgba(243,244,244,0.72)]">
+        Checking your session…
+      </main>
+    </AppChrome>
   )
 }
 
 export function RouteError({ error }: { error: unknown }) {
   const message = error instanceof Error ? error.message : 'Something went wrong'
   return (
-    <main className="grid h-dvh place-items-center bg-fb-app px-6 text-center">
-      <div>
-        <h1 className="text-[20px] font-semibold text-fb-text">Something went wrong</h1>
-        <p className="mt-2 max-w-[42ch] text-[13px] text-fb-danger">{message}</p>
-        <Link to="/" className="mt-6 inline-block text-[13px] text-fb-text">
-          Home
-        </Link>
-      </div>
-    </main>
+    <AppChrome>
+      <main className="relative z-[1] grid h-dvh place-items-center px-6 text-center">
+        <div>
+          <h1 className="text-[32px] font-bold tracking-[-0.04em] text-[#f4f4f4]">
+            Something went wrong
+          </h1>
+          <p className="mt-3 max-w-[42ch] text-[14px] text-fb-danger">{message}</p>
+          <Link to="/" className="app-btn mt-8">
+            Home
+          </Link>
+        </div>
+      </main>
+    </AppChrome>
   )
 }

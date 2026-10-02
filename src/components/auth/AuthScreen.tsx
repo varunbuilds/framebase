@@ -1,5 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
+import logo from '@/assets/framebase-logo.png'
+import { AppChrome } from '@/components/layout/AppChrome'
 
 export function AuthScreen({
   title,
@@ -11,26 +13,23 @@ export function AuthScreen({
   footer: ReactNode
 }) {
   return (
-    <main className="flex h-dvh items-center justify-center overflow-auto bg-fb-app px-6 py-10">
-      <div className="w-full max-w-[380px]">
-        <Link to="/" className="mb-8 flex items-center gap-2 no-underline">
-          <span className="flex h-6 w-6 items-center justify-center rounded-[6px] bg-white text-[11px] font-bold text-black">
-            F
-          </span>
-          <span className="text-[13px] font-semibold text-fb-text">Framebase</span>
-        </Link>
-        <h1 className="mb-6 text-[22px] font-semibold tracking-tight text-fb-text">
-          {title}
-        </h1>
-        {children}
-        <p className="mt-6 text-[13px] text-fb-muted">{footer}</p>
-      </div>
-    </main>
+    <AppChrome>
+      <main className="relative z-[1] flex min-h-dvh items-center justify-center overflow-auto px-6 py-16">
+        <div className="w-full max-w-[420px]">
+          <Link to="/" className="mb-10 inline-flex no-underline">
+            <img className="app-mark" src={logo} alt="Framebase" />
+          </Link>
+          <h1 className="mb-8 text-[32px] font-bold leading-none tracking-[-0.04em] text-[#f4f4f4]">
+            {title}
+          </h1>
+          {children}
+          <p className="mt-8 text-[14px] text-[rgba(243,244,244,0.72)]">{footer}</p>
+        </div>
+      </main>
+    </AppChrome>
   )
 }
 
-export const authFieldClass =
-  'h-10 w-full rounded-md border border-fb-border-strong bg-fb-surface px-3 text-[13px] text-fb-text outline-none placeholder:text-fb-subtle'
+export const authFieldClass = 'app-field h-11 px-3.5'
 
-export const authButtonClass =
-  'h-10 w-full rounded-md bg-white text-[13px] font-medium text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50'
+export const authButtonClass = 'app-btn app-btn-block disabled:opacity-50'

@@ -1,4 +1,5 @@
 import { Link, getRouteApi } from '@tanstack/react-router'
+import logo from '@/assets/framebase-logo.png'
 import {
   Circle,
   Download,
@@ -179,20 +180,8 @@ export function TopToolbar() {
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-fb-border bg-fb-panel px-4">
-      <Link
-        to="/projects"
-        className="flex items-center gap-2 pr-2 no-underline"
-        title="Projects"
-      >
-        <div
-          className="flex h-6 w-6 items-center justify-center rounded-[6px] bg-white text-[11px] font-bold tracking-tight text-black"
-          aria-hidden
-        >
-          F
-        </div>
-        <span className="text-[13px] font-semibold tracking-tight text-fb-text">
-          Framebase
-        </span>
+      <Link to="/projects" className="flex items-center pr-2 no-underline" title="Projects">
+        <img className="app-mark" src={logo} alt="Framebase" />
       </Link>
 
       <div className="h-4 w-px bg-fb-border" aria-hidden />

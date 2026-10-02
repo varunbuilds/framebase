@@ -1,4 +1,5 @@
 import { getRouteApi, Link } from '@tanstack/react-router'
+import { AppChrome } from '@/components/layout/AppChrome'
 import { useEffect, useRef, useState } from 'react'
 import { EditorShell } from '@/components/layout/EditorShell'
 import { ProjectRoom } from '@/features/collab/ProjectRoom'
@@ -177,41 +178,39 @@ function ProjectAutosave({ projectId }: { projectId: string }) {
 
 export function EditorNotFound() {
   return (
-    <main className="grid h-dvh place-items-center bg-fb-app px-6 text-center">
-      <div>
-        <h1 className="text-[20px] font-semibold text-fb-text">
-          This project is not available
-        </h1>
-        <p className="mt-2 max-w-[36ch] text-[13px] text-fb-muted">
-          It may have been deleted, or it belongs to another account.
-        </p>
-        <Link
-          to="/projects"
-          className="mt-6 inline-block h-9 rounded-md bg-white px-3 text-[13px] font-medium leading-9 text-black no-underline"
-        >
-          Back to projects
-        </Link>
-      </div>
-    </main>
+    <AppChrome>
+      <main className="relative z-[1] grid h-dvh place-items-center px-6 text-center">
+        <div>
+          <h1 className="text-[32px] font-bold tracking-[-0.04em] text-[#f4f4f4]">
+            This project is not available
+          </h1>
+          <p className="mt-3 max-w-[36ch] text-[15px] text-[rgba(243,244,244,0.72)]">
+            It may have been deleted, or it belongs to another account.
+          </p>
+          <Link to="/projects" className="app-btn mt-8">
+            Back to projects
+          </Link>
+        </div>
+      </main>
+    </AppChrome>
   )
 }
 
 export function EditorLoadError({ error }: { error: unknown }) {
   const message = error instanceof Error ? error.message : 'Could not open this project'
   return (
-    <main className="grid h-dvh place-items-center bg-fb-app px-6 text-center">
-      <div>
-        <h1 className="text-[20px] font-semibold text-fb-text">
-          Could not open this project
-        </h1>
-        <p className="mt-2 max-w-[42ch] text-[13px] text-fb-danger">{message}</p>
-        <Link
-          to="/projects"
-          className="mt-6 inline-block h-9 rounded-md bg-white px-3 text-[13px] font-medium leading-9 text-black no-underline"
-        >
-          Back to projects
-        </Link>
-      </div>
-    </main>
+    <AppChrome>
+      <main className="relative z-[1] grid h-dvh place-items-center px-6 text-center">
+        <div>
+          <h1 className="text-[32px] font-bold tracking-[-0.04em] text-[#f4f4f4]">
+            Could not open this project
+          </h1>
+          <p className="mt-3 max-w-[42ch] text-[15px] text-fb-danger">{message}</p>
+          <Link to="/projects" className="app-btn mt-8">
+            Back to projects
+          </Link>
+        </div>
+      </main>
+    </AppChrome>
   )
 }

@@ -349,7 +349,7 @@ function VideoFilmstrip({
           return (
             <div
               key={slot}
-              className="h-full shrink-0 bg-[#1a2228]"
+              className="h-full shrink-0 bg-[#0b1016]"
               style={{ width: thumbWidth }}
             >
               {frame ? (
@@ -497,7 +497,7 @@ function TimelineClipBlock({
           : blade
             ? 'cursor-crosshair'
             : 'cursor-default'
-      } ${isVideo ? 'bg-[#151c22]' : 'bg-[#13241f]'} ${
+      } ${isVideo ? 'bg-[#0b1016]' : 'bg-[#13241f]'} ${
         trimmingEdge
           ? 'z-10 border-[#7dffb2]'
           : selected
@@ -520,7 +520,7 @@ function TimelineClipBlock({
           <div className="text-white/75">{formatFrameClock(trimEdgeMs)}</div>
         </div>
       )}
-      <div className="relative flex h-[22px] shrink-0 items-center overflow-clip rounded-t-[4px] bg-[#243038] px-2">
+      <div className="relative flex h-[22px] shrink-0 items-center overflow-clip rounded-t-[4px] bg-[#10161c] px-2">
         <span className="truncate text-[10px] font-medium leading-none text-white/90">
           {title}
         </span>
@@ -528,7 +528,7 @@ function TimelineClipBlock({
 
       <div
         className={`relative min-h-0 flex-1 overflow-clip rounded-b-[4px] ${
-          isVideo ? 'bg-[#1a2228]' : 'bg-[#16352c]'
+          isVideo ? 'bg-[#0b1016]' : 'bg-[#16352c]'
         }`}
       >
         {isVideo && objectUrl && media ? (

@@ -68,8 +68,11 @@ export function EditorShell() {
   return (
     <div
       data-theme="dark"
-      className="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-fb-app text-fb-text"
+      className="app-stage relative flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-[#07090b] text-[#f3f4f4]"
     >
+      <div className="app-grain" aria-hidden="true" />
+      <div className="app-edge app-edge-left" aria-hidden="true" />
+      <div className="app-edge app-edge-right" aria-hidden="true" />
       <TopToolbar />
       <CollabConnectionBanner />
       <WorkspaceConnectionBanner />
@@ -145,7 +148,7 @@ function WorkspaceConnectionBanner() {
               workspace.status === 'needs-permission' ? reconnectWorkspace : chooseWorkspace
             void restore().finally(() => setPending(false))
           }}
-          className="h-7 shrink-0 rounded-md bg-white px-2.5 text-[12px] font-medium text-black disabled:opacity-50"
+          className="app-btn h-7 text-[12px] disabled:opacity-50"
         >
           {pending ? 'Opening…' : workspace.status === 'none' ? 'Select workspace' : 'Reconnect'}
         </button>

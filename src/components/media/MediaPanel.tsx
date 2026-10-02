@@ -309,7 +309,7 @@ export function MediaPanel() {
                       title="Click to select. Command-click or drag a box to select more, then drag the group onto the timeline."
                       className="block w-full cursor-default text-left"
                     >
-                      <span className="relative block aspect-video overflow-hidden rounded-[5px] border border-white/[0.08] bg-[#181e22]">
+                      <span className="relative block aspect-video overflow-hidden rounded-[5px] border border-white/[0.08] bg-[#07090b]">
                         {source.kind === 'video' && objectUrl ? (
                           <video
                             src={objectUrl}

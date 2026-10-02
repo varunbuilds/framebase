@@ -50,15 +50,15 @@ export function GoogleSignInButton({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-3 text-[11px] uppercase tracking-[0.08em] text-fb-subtle">
-        <span className="h-px flex-1 bg-fb-border" />
+        <span className="h-px flex-1 bg-white/15" />
         or
-        <span className="h-px flex-1 bg-fb-border" />
+        <span className="h-px flex-1 bg-white/15" />
       </div>
       <button
         type="button"
         onClick={() => void start()}
         disabled={disabled || pending || status === 'unconfigured'}
-        className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-fb-border-strong bg-fb-surface text-[13px] font-medium text-fb-text hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex h-11 w-full items-center justify-center gap-2 border border-[rgba(255,255,255,0.18)] bg-[rgba(255,255,255,0.04)] text-[13px] font-semibold text-[#f4f4f4] hover:border-[rgba(255,255,255,0.32)] disabled:cursor-not-allowed disabled:opacity-50"
       >
         <GoogleMark />
         {pending ? 'Continuing to Google…' : 'Continue with Google'}

@@ -23,7 +23,7 @@ export function AuthCallbackPage() {
     <AuthScreen
       title="Signing in"
       footer={
-        <Link to="/login" search={{ redirect: '' }} className="text-fb-text">
+        <Link to="/login" search={{ redirect: '' }} className="app-link">
           Back to sign in
         </Link>
       }

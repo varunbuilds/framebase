@@ -2,6 +2,8 @@ import { getRouteApi, Link, useNavigate, useRouter } from '@tanstack/react-route
 import { useState } from 'react'
 import { NewProjectDialog } from '@/components/projects/NewProjectDialog'
 import { WorkspaceAccess } from '@/components/projects/WorkspaceAccess'
+import { AppChrome } from '@/components/layout/AppChrome'
+import logo from '@/assets/framebase-logo.png'
 import { useAuth } from '@/features/auth/use-auth'
 import { releaseProjectMedia } from '@/lib/media/release-project-media'
 import { deleteProjectCloudMedia } from '@/lib/media/publish-source'
@@ -93,39 +95,32 @@ export function ProjectsPage() {
   }
 
   return (
-    <main className="flex h-dvh flex-col overflow-hidden bg-fb-app">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-fb-border px-6">
-        <Link to="/" className="flex items-center gap-2 no-underline">
-          <span className="flex h-6 w-6 items-center justify-center rounded-[6px] bg-white text-[11px] font-bold text-black">
-            F
-          </span>
-          <span className="text-[13px] font-semibold text-fb-text">Framebase</span>
+    <AppChrome className="flex h-dvh flex-col overflow-hidden">
+      <header className="relative z-[1] flex h-[74px] shrink-0 items-center justify-between px-9">
+        <Link to="/" className="no-underline">
+          <img className="app-mark" src={logo} alt="Framebase" />
         </Link>
-        <div className="flex items-center gap-3">
-          <span className="max-w-[220px] truncate text-[12px] text-fb-muted">
+        <div className="flex items-center gap-4">
+          <span className="max-w-[220px] truncate text-[12px] tracking-[0.04em] text-[rgba(243,244,244,0.55)]">
             {user?.email}
           </span>
-          <button
-            type="button"
-            onClick={() => void onLogout()}
-            className="h-8 rounded-md border border-fb-border px-3 text-[12px] text-fb-text hover:bg-white/[0.06]"
-          >
+          <button type="button" onClick={() => void onLogout()} className="app-btn-quiet">
             Log out
           </button>
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-[1080px] flex-1 flex-col overflow-auto px-6 py-8">
+      <div className="relative z-[1] mx-auto flex w-full max-w-[1080px] flex-1 flex-col overflow-auto px-9 py-8">
         <WorkspaceAccess />
 
         {library ? (
           <>
         <div className="mb-8 flex items-end justify-between gap-4">
           <div>
-            <h1 className="text-[28px] font-semibold tracking-tight text-fb-text">
+            <h1 className="text-[40px] font-bold leading-none tracking-[-0.04em] text-[#f4f4f4]">
               Projects
             </h1>
-            <p className="mt-1 text-[13px] text-fb-muted">
+            <p className="mt-3 text-[15px] text-[rgba(243,244,244,0.72)]">
               Open a cut, or start an empty timeline.
             </p>
           </div>
@@ -135,7 +130,7 @@ export function ProjectsPage() {
               setError(null)
               setDialogOpen(true)
             }}
-            className="h-9 rounded-md bg-white px-3 text-[13px] font-medium text-black"
+            className="app-btn"
           >
             New Project
           </button>
@@ -145,27 +140,24 @@ export function ProjectsPage() {
 
         {projects.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center pb-16 text-center">
-            <h2 className="text-[18px] font-medium text-fb-text">No projects yet</h2>
-            <p className="mt-2 text-[13px] text-fb-muted">Create your first project</p>
+            <h2 className="text-[18px] font-semibold text-[#f4f4f4]">No projects yet</h2>
+            <p className="mt-2 text-[14px] text-[rgba(243,244,244,0.72)]">Create your first project</p>
           </div>
         ) : (
           <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {projects.map((project) => (
-              <li
-                key={project.id}
-                className="flex min-h-[148px] flex-col rounded-lg border border-fb-border bg-fb-panel p-4"
-              >
-                <h2 className="truncate text-[15px] font-medium text-fb-text">
+              <li key={project.id} className="app-panel flex min-h-[148px] flex-col p-4">
+                <h2 className="truncate text-[15px] font-semibold text-[#f4f4f4]">
                   {project.name}
                 </h2>
-                <p className="mt-1 text-[12px] text-fb-subtle">
+                <p className="mt-1 text-[12px] text-[rgba(243,244,244,0.55)]">
                   Updated {formatUpdated(project.updatedAt)}
                 </p>
                 <div className="mt-auto flex items-center gap-2 pt-6">
                   <Link
                     to="/editor/$projectId"
                     params={{ projectId: project.id }}
-                    className="h-8 rounded-md bg-white px-3 text-[12px] font-medium leading-8 text-black no-underline"
+                    className="app-btn h-8 text-[12px]"
                   >
                     Open
                   </Link>
@@ -175,14 +167,14 @@ export function ProjectsPage() {
                         type="button"
                         onClick={() => void onDelete(project.id)}
                         disabled={deletingId === project.id}
-                        className="h-8 px-2 text-[12px] text-fb-danger"
+                        className="app-btn-quiet text-fb-danger"
                       >
                         {deletingId === project.id ? 'Deleting…' : 'Confirm'}
                       </button>
                       <button
                         type="button"
                         onClick={() => setConfirmingId(null)}
-                        className="h-8 px-2 text-[12px] text-fb-muted"
+                        className="app-btn-quiet"
                       >
                         Cancel
                       </button>
@@ -191,7 +183,7 @@ export function ProjectsPage() {
                     <button
                       type="button"
                       onClick={() => setConfirmingId(project.id)}
-                      className="h-8 px-2 text-[12px] text-fb-muted hover:text-fb-text"
+                      className="app-btn-quiet"
                     >
                       Delete
                     </button>
@@ -214,6 +206,6 @@ export function ProjectsPage() {
           onCreate={(project) => void onCreate(project)}
         />
       )}
-    </main>
+    </AppChrome>
   )
 }
