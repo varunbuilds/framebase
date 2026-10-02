@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import hero from '@/assets/hero.png'
 import logo from '@/assets/framebase-logo.png'
 import profile from '@/assets/profile.png'
@@ -75,8 +75,6 @@ const SECTIONS = [
     label: 'Feedback',
   },
 ] as const
-
-const SECTION_TITLES = SECTIONS.map((section) => (section.id === 'about' ? 'Framebase' : section.label))
 
 function FaqList() {
   const [open, setOpen] = useState<string>(FAQ[0].n)
@@ -294,56 +292,7 @@ export function LandingPage() {
     }
   }, [])
 
-  const sectionOffset = progress * (SECTIONS.length - 1)
-  const activeLink = Math.round(sectionOffset)
-  const reduceMotion =
-    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  const titleOffset = reduceMotion ? activeLink : sectionOffset
-  const wordmarkWindowRef = useRef<HTMLSpanElement>(null)
-  const wordmarkTrackRef = useRef<HTMLSpanElement>(null)
-  const [titleGap, setTitleGap] = useState(0)
-  const [titleFrame, setTitleFrame] = useState(0)
-  const [titleCenters, setTitleCenters] = useState<number[]>([])
-
-  useLayoutEffect(() => {
-    const frame = wordmarkWindowRef.current
-    const track = wordmarkTrackRef.current
-    if (!frame || !track) return
-
-    const measure = () => {
-      const items = Array.from(track.children)
-      const widths = items.map((item) => item.getBoundingClientRect().width)
-      const widest = widths.reduce((max, width) => Math.max(max, width), 0)
-      const otherGaps = [1, 2]
-        .map((index) => widest - ((widths[index] ?? widest) + (widths[index + 1] ?? widest)) / 2)
-        .filter((gap) => Number.isFinite(gap))
-      const nextGap =
-        otherGaps.length === 0 ? 0 : otherGaps.reduce((sum, gap) => sum + gap, 0) / otherGaps.length
-      setTitleGap((current) => (Math.abs(current - nextGap) < 0.5 ? current : Math.max(0, nextGap)))
-      const origin = track.getBoundingClientRect().left
-      const centers = items.map((item) => {
-        const box = item.getBoundingClientRect()
-        return box.left - origin + box.width / 2
-      })
-      setTitleCenters((current) =>
-        current.length === centers.length && current.every((value, index) => Math.abs(value - (centers[index] ?? value)) < 0.5)
-          ? current
-          : centers,
-      )
-      setTitleFrame((current) => (Math.abs(current - frame.clientWidth) < 0.5 ? current : frame.clientWidth))
-    }
-
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(frame)
-    return () => observer.disconnect()
-  }, [titleGap])
-
-  const titleIndex = Math.min(Math.max(0, titleCenters.length - 1), Math.max(0, Math.floor(titleOffset)))
-  const titleBlend = titleOffset - titleIndex
-  const titleFrom = titleCenters[titleIndex] ?? 0
-  const titleTo = titleCenters[titleIndex + 1] ?? titleFrom
-  const titleShift = titleFrame / 2 - (titleFrom + (titleTo - titleFrom) * titleBlend)
+  const activeLink = Math.round(progress * (SECTIONS.length - 1))
 
   const scrollToLink = (index: number) => {
     const strip = stripRef.current
@@ -369,29 +318,6 @@ export function LandingPage() {
 
       <header className="landing-header">
         <img className="landing-mark" src={logo} alt="" />
-        <p className="landing-wordmark">
-          <span className="landing-wordmark-live" aria-live="polite">
-            {SECTION_TITLES[activeLink]}
-          </span>
-          <span ref={wordmarkWindowRef} className="landing-wordmark-window" aria-hidden="true">
-            <span className="landing-wordmark-sizers">
-              {SECTION_TITLES.map((title) => (
-                <span key={title}>{title}</span>
-              ))}
-            </span>
-            <span
-              ref={wordmarkTrackRef}
-              className="landing-wordmark-track"
-              style={{ gap: titleGap, transform: `translate3d(${titleShift}px, 0, 0)` }}
-            >
-              {SECTION_TITLES.map((title) => (
-                <span key={title} className="landing-wordmark-item">
-                  {title}
-                </span>
-              ))}
-            </span>
-          </span>
-        </p>
         <div className="landing-contact">
           {signedIn ? (
             <Link to="/projects" className="landing-contact-link">

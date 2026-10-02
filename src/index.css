@@ -346,58 +346,8 @@ html.media-dragging * {
   mix-blend-mode: screen;
 }
 
-.landing-wordmark {
-  position: relative;
-  margin: 0;
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 0.95;
-  letter-spacing: -0.04em;
-  text-transform: uppercase;
-}
-
-.landing-wordmark-live {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.landing-wordmark-window {
-  position: relative;
-  display: block;
-  overflow: hidden;
-}
-
-.landing-wordmark-sizers {
-  display: grid;
-}
-
-.landing-wordmark-sizers > span {
-  grid-area: 1 / 1;
-  visibility: hidden;
-  white-space: nowrap;
-}
-
-.landing-wordmark-track {
-  position: absolute;
-  top: 0;
-  left: 0;
-  display: flex;
-  align-items: center;
-  height: 100%;
-}
-
-.landing-wordmark-item {
-  white-space: nowrap;
-}
-
 .landing-contact {
+  grid-column: 3;
   justify-self: end;
 }
 
