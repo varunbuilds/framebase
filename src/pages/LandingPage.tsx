@@ -162,6 +162,20 @@ export function LandingPage() {
   const [progress, setProgress] = useState(0)
   const [playheadLeft, setPlayheadLeft] = useState(0)
   const [clock, setClock] = useState('')
+  const [signOpen, setSignOpen] = useState(false)
+
+  const placeSignBox = (event: { currentTarget: HTMLDivElement }) => {
+    const root = rootRef.current
+    const link = event.currentTarget.querySelector('a')
+    if (!root || !link) return
+    const frame = root.getBoundingClientRect()
+    const box = link.getBoundingClientRect()
+    root.style.setProperty('--sign-top', `${box.top - frame.top}px`)
+    root.style.setProperty('--sign-right', `${frame.right - box.right}px`)
+    root.style.setProperty('--sign-width', `${box.width}px`)
+    root.style.setProperty('--sign-height', `${box.height}px`)
+    setSignOpen(true)
+  }
 
   useEffect(() => {
     const paint = () => {
@@ -304,7 +318,7 @@ export function LandingPage() {
   }
 
   return (
-    <main ref={rootRef} className="landing-page">
+    <main ref={rootRef} className={signOpen ? 'landing-page is-sign-open' : 'landing-page'}>
       <div className="landing-grain" aria-hidden="true" />
       <div className="landing-edge landing-edge-left" aria-hidden="true" />
       <div className="landing-edge landing-edge-right" aria-hidden="true" />
@@ -319,7 +333,13 @@ export function LandingPage() {
 
       <header className="landing-header">
         <img className="landing-mark" src={logo} alt="" />
-        <div className="landing-contact">
+        <div
+          className="landing-contact"
+          onPointerEnter={placeSignBox}
+          onPointerLeave={() => setSignOpen(false)}
+          onFocusCapture={placeSignBox}
+          onBlurCapture={() => setSignOpen(false)}
+        >
           {signedIn ? (
             <Link to="/projects" className="landing-contact-link">
               Open projects
@@ -348,6 +368,15 @@ export function LandingPage() {
                     Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY before signing in.
                   </p>
                 ) : null}
+                {signedIn ? (
+                  <Link to="/projects" className="landing-home-start">
+                    Get started
+                  </Link>
+                ) : (
+                  <Link to="/login" search={{ redirect: '' }} className="landing-home-start">
+                    Get Started
+                  </Link>
+                )}
               </div>
               <img className="landing-hero" src={hero} alt="Framebase editor" draggable={false} />
               <div className="landing-presence" aria-hidden="true">
