@@ -93,8 +93,9 @@ function FaqList() {
               aria-expanded={isOpen}
               onClick={() => setOpen(isOpen ? '' : item.n)}
             >
-              <span>{item.n}</span>
-              {item.question}
+              <span className="landing-faq-index">{item.n}</span>
+              <span className="landing-faq-copy">{item.question}</span>
+              <span className={isOpen ? 'landing-faq-mark is-open' : 'landing-faq-mark'} aria-hidden="true" />
             </button>
             <div className={isOpen ? 'landing-faq-answer is-open' : 'landing-faq-answer'}>
               <p>{item.answer}</p>
@@ -106,7 +107,7 @@ function FaqList() {
   )
 }
 
-function FeedbackSection({ headingId }: { headingId: string }) {
+function FeedbackSection() {
   const [note, setNote] = useState('')
   const [ready, setReady] = useState(false)
 
@@ -122,11 +123,7 @@ function FeedbackSection({ headingId }: { headingId: string }) {
   }
 
   return (
-    <section className="landing-section landing-close" aria-labelledby={headingId}>
-      
-      <h1 id={headingId}>
-        Feedback 
-      </h1>
+    <section className="landing-section landing-close" aria-label="Feedback">
       <form className="landing-feedback" onSubmit={onSubmit}>
         <label htmlFor="landing-feedback-note">A note</label>
         <textarea
@@ -453,25 +450,15 @@ export function LandingPage() {
               </div>
             </section>
           ) : section.id === 'faq' ? (
-            <section
-              key={section.id}
-              className="landing-section landing-faq"
-              aria-labelledby={`landing-${section.id}`}
-            >
-              <h1 id={`landing-${section.id}`}>{section.label}</h1>
+            <section key={section.id} className="landing-section landing-faq" aria-label={section.label}>
               <FaqList />
             </section>
           ) : section.id === 'features' ? (
-            <section
-              key={section.id}
-              className="landing-section landing-features"
-              aria-labelledby={`landing-${section.id}`}
-            >
-              <h1 id={`landing-${section.id}`}>{section.label}</h1>
+            <section key={section.id} className="landing-section landing-features" aria-label={section.label}>
               <FeatureFrames />
             </section>
           ) : (
-            <FeedbackSection key={section.id} headingId={`landing-${section.id}`} />
+            <FeedbackSection key={section.id} />
           ),
         )}
       </div>
