@@ -5,6 +5,11 @@ import logo from '@/assets/framebase-logo.png'
 import profile from '@/assets/profile.png'
 import { FeatureFrames } from '@/components/landing/FeatureFrames'
 import { useAuth } from '@/features/auth/use-auth'
+import {
+  formatFeedbackWait,
+  getFeedbackRateLimit,
+  recordFeedbackSend,
+} from '@/features/landing/feedback-rate-limit'
 import { formatTimecode } from '@/utils/time'
 
 const RULER_TICKS = Array.from({ length: 33 }, (_, index) => ({
@@ -105,49 +110,120 @@ function FaqList() {
   )
 }
 
+const FEEDBACK_FORM_ACTION =
+  'https://docs.google.com/forms/d/e/1FAIpQLSf-EGYzWafV9QSKzkUrhJWU3CloCSsXaeLKPFdcidwUyM-SNw/formResponse'
+const FEEDBACK_FORM_NOTE = 'entry.200419578'
+
 function FeedbackSection() {
   const [note, setNote] = useState('')
-  const [ready, setReady] = useState(false)
+  const [honeypot, setHoneypot] = useState('')
+  const [sent, setSent] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [limit, setLimit] = useState(() => getFeedbackRateLimit())
+
+  useEffect(() => {
+    if (limit.allowed) return
+    const id = window.setInterval(() => {
+      const next = getFeedbackRateLimit()
+      setLimit(next)
+      if (next.allowed) window.clearInterval(id)
+    }, 1000)
+    return () => window.clearInterval(id)
+  }, [limit.allowed, limit.retryAfterMs])
+
+  useEffect(() => {
+    if (!sent) return
+    const id = window.setTimeout(() => setSent(false), 2000)
+    return () => window.clearTimeout(id)
+  }, [sent])
+
+  const blocked = !limit.allowed
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const text = note.trim()
-    if (!text) return
-    const url = new URL('https://github.com/varunbuilds/framebase/issues/new')
-    url.searchParams.set('title', 'Landing feedback')
-    url.searchParams.set('body', text)
-    window.open(url, '_blank', 'noopener,noreferrer')
-    setReady(true)
+    if (!text || pending || blocked) return
+    // Bots that fill hidden fields are dropped without contacting the form.
+    if (honeypot.trim()) {
+      setNote('')
+      setSent(true)
+      return
+    }
+    const current = getFeedbackRateLimit()
+    if (!current.allowed) {
+      setLimit(current)
+      return
+    }
+    setPending(true)
+    setSent(false)
+    const body = new FormData()
+    body.set(FEEDBACK_FORM_NOTE, text)
+    void fetch(FEEDBACK_FORM_ACTION, {
+      method: 'POST',
+      mode: 'no-cors',
+      body,
+    }).finally(() => {
+      recordFeedbackSend()
+      setLimit(getFeedbackRateLimit())
+      setNote('')
+      setSent(true)
+      setPending(false)
+    })
   }
 
   return (
     <section className="landing-section landing-close" aria-label="Feedback">
-      <form className="landing-feedback" onSubmit={onSubmit}>
-        <label htmlFor="landing-feedback-note">A note</label>
-        <textarea
-          id="landing-feedback-note"
-          name="note"
-          rows={4}
-          required
-          value={note}
-          placeholder="What should change?"
-          onChange={(event) => {
-            setNote(event.target.value)
-            setReady(false)
-          }}
-        />
-        <button type="submit">Send</button>
-        {ready ? <p>Your note is ready in a new GitHub issue.</p> : null}
-      </form>
-      <footer className="landing-close-foot">
-        <p className="landing-credit">
-          Made by
-          <a href="https://varunrewadi.com" target="_blank" rel="noreferrer">
-            <img src={profile} alt="" />
-            <span>Varun</span>
-          </a>
-        </p>
-      </footer>
+      <div className="landing-close-body">
+        <form className="landing-feedback" onSubmit={onSubmit}>
+          <label htmlFor="landing-feedback-note">A note</label>
+          <textarea
+            id="landing-feedback-note"
+            name={FEEDBACK_FORM_NOTE}
+            rows={4}
+            required
+            maxLength={2000}
+            value={note}
+            placeholder="What should change?"
+            disabled={pending || blocked}
+            onChange={(event) => {
+              setNote(event.target.value)
+              setSent(false)
+            }}
+          />
+          <input
+            className="landing-feedback-honeypot"
+            type="text"
+            name="company"
+            tabIndex={-1}
+            autoComplete="off"
+            value={honeypot}
+            aria-hidden="true"
+            onChange={(event) => setHoneypot(event.target.value)}
+          />
+          <button
+            type="submit"
+            className={sent && !blocked ? 'is-sent' : undefined}
+            disabled={pending || blocked}
+          >
+            {pending ? 'Sending…' : blocked ? 'Wait' : sent ? 'Sent' : 'Send'}
+          </button>
+          <div className={sent && !blocked ? 'landing-feedback-status is-visible' : 'landing-feedback-status'}>
+            <p>Thanks — your note was sent.</p>
+          </div>
+          {blocked ? (
+            <p>You can send more feedback in {formatFeedbackWait(limit.retryAfterMs)}.</p>
+          ) : null}
+        </form>
+        <footer className="landing-close-foot">
+          <p className="landing-credit">
+            Made by
+            <a href="https://varunrewadi.com" target="_blank" rel="noreferrer">
+              <img src={profile} alt="" />
+              <span>Varun</span>
+            </a>
+          </p>
+        </footer>
+      </div>
     </section>
   )
 }
