@@ -68,7 +68,7 @@ export function EditorShell() {
   return (
     <div
       data-theme="dark"
-      className="app-stage relative flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-[#07090b] text-[#f3f4f4]"
+      className="relative flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-fb-panel text-fb-text"
     >
       <TopToolbar />
       <CollabConnectionBanner />

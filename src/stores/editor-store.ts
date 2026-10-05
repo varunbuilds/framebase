@@ -337,7 +337,7 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     set({
       ui: {
         ...get().ui,
-        pixelsPerSecond: clamp(pps, 20, 240),
+        pixelsPerSecond: clamp(pps, 20, 960),
       },
     })
   },

@@ -55,10 +55,10 @@ import {
 } from '@/lib/media/media-drag'
 import type { Clip, Track } from '@/types/timeline'
 import { downloadVideoFrame } from '@/lib/media/save-frame'
-import { clamp, formatFrameClock, formatSignedFrameClock, formatTimecode, FRAME_DURATION_MS, msToSeconds, snapToFrameMs } from '@/utils/time'
+import { clamp, formatFrameClock, formatSignedFrameClock, FRAME_DURATION_MS, msToSeconds, snapToFrameMs, TIMELINE_FPS } from '@/utils/time'
 
 const TRACK_HEIGHT = 104
-const RULER_HEIGHT = 28
+const RULER_HEIGHT = 36
 const LABEL_WIDTH = 88
 /** Keeps the clip border/selection ring from clipping under the track titles. */
 const TIMELINE_X_INSET = 2
@@ -67,6 +67,103 @@ const TIMELINE_MAX_HEIGHT = 720
 /** Leave room for the toolbar + a usable preview region. */
 const MIN_UPPER_AREA_PX = 200
 const TOOLBAR_HEIGHT_PX = 44
+/** Zoom range in px/s. High end ≈ 32px/frame at 30fps — NLE frame-edit territory. */
+const TIMELINE_MIN_PPS = 20
+const TIMELINE_MAX_PPS = 960
+
+type RulerMarkLevel = 'major' | 'medium' | 'minor'
+
+type RulerScale = {
+  /** Smallest tick step, in whole frames. */
+  minorFrames: number
+  /** Medium tick every N minors. */
+  mediumEvery: number
+  /** Labeled major tick every N minors. */
+  majorEvery: number
+}
+
+/**
+ * Premiere/Resolve-style ladder: coarse → fine in whole frames so ticks stay
+ * on the editorial grid. Selection targets ~5–12px minors and ~50–90px majors.
+ */
+function rulerScale(pixelsPerSecond: number): RulerScale {
+  const fps = TIMELINE_FPS
+  const scales: RulerScale[] = [
+    { minorFrames: fps * 60, mediumEvery: 2, majorEvery: 5 }, // 1m / 2m / 5m
+    { minorFrames: fps * 30, mediumEvery: 2, majorEvery: 4 }, // 30s / 1m / 2m
+    { minorFrames: fps * 10, mediumEvery: 3, majorEvery: 6 }, // 10s / 30s / 60s
+    { minorFrames: fps * 5, mediumEvery: 2, majorEvery: 6 }, // 5s / 10s / 30s
+    { minorFrames: fps * 2, mediumEvery: 5, majorEvery: 15 }, // 2s / 10s / 30s
+    { minorFrames: fps, mediumEvery: 5, majorEvery: 10 }, // 1s / 5s / 10s
+    { minorFrames: fps / 2, mediumEvery: 2, majorEvery: 4 }, // 15f / 1s / 2s
+    { minorFrames: 10, mediumEvery: 3, majorEvery: 6 }, // 10f / 30f / 60f
+    { minorFrames: 5, mediumEvery: 2, majorEvery: 6 }, // 5f / 10f / 30f
+    { minorFrames: 2, mediumEvery: 5, majorEvery: 15 }, // 2f / 10f / 30f
+    { minorFrames: 1, mediumEvery: 5, majorEvery: 10 }, // 1f / 5f / 10f
+    { minorFrames: 1, mediumEvery: 2, majorEvery: 5 }, // 1f / 2f / 5f
+  ]
+
+  let chosen = scales[0]!
+  for (const scale of scales) {
+    const minorMs = scale.minorFrames * FRAME_DURATION_MS
+    const majorPx = msToPx(minorMs * scale.majorEvery, pixelsPerSecond)
+    const minorPx = msToPx(minorMs, pixelsPerSecond)
+    // Pack denser than a sparse overview ruler; still keep labels readable.
+    if (majorPx < 52 || minorPx < 4.5) break
+    chosen = scale
+  }
+  return chosen
+}
+
+function formatRulerLabel(ms: number, minorFrames: number): string {
+  // Sub-second majors → SMPTE-style mm:ss:ff like real NLEs.
+  if (minorFrames < TIMELINE_FPS) return formatFrameClock(ms)
+  const totalSeconds = Math.max(0, Math.round(ms / 1000))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  if (hours > 0) return `${hours}:${pad(minutes)}:${pad(seconds)}`
+  return `${minutes}:${pad(seconds)}`
+}
+
+function buildRulerMarks(
+  contentWidth: number,
+  pixelsPerSecond: number,
+  scrollLeft: number,
+  viewportWidth: number,
+): { marks: Array<{ ms: number; level: RulerMarkLevel }>; minorFrames: number } {
+  const { minorFrames, mediumEvery, majorEvery } = rulerScale(pixelsPerSecond)
+  const minorMs = minorFrames * FRAME_DURATION_MS
+  // Virtualize: only ticks near the viewport (full duration × 1f would be huge).
+  const padPx = Math.max(viewportWidth, 400)
+  const startPx = Math.max(0, scrollLeft - padPx)
+  const endPx = Math.min(
+    Math.max(0, contentWidth - TIMELINE_X_INSET),
+    scrollLeft + Math.max(viewportWidth, 0) + padPx,
+  )
+  const startIndex = Math.max(
+    0,
+    Math.floor(pxToMs(startPx, pixelsPerSecond) / minorMs),
+  )
+  const endIndex = Math.max(
+    startIndex,
+    Math.ceil(pxToMs(endPx, pixelsPerSecond) / minorMs),
+  )
+
+  const marks: Array<{ ms: number; level: RulerMarkLevel }> = []
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    const ms = Math.round(index * minorFrames * FRAME_DURATION_MS)
+    const level: RulerMarkLevel =
+      index % majorEvery === 0
+        ? 'major'
+        : index % mediumEvery === 0
+          ? 'medium'
+          : 'minor'
+    marks.push({ ms, level })
+  }
+  return { marks, minorFrames }
+}
 
 function getTimelineHeightMax(): number {
   if (typeof window === 'undefined') return TIMELINE_MAX_HEIGHT
@@ -666,11 +763,14 @@ function TimelinePlayhead({
 
   return (
     <div
-      className="pointer-events-none absolute top-0 bottom-0 z-30 w-px bg-fb-playhead/80"
-      style={{ left: LABEL_WIDTH + playheadLeft }}
+      className="pointer-events-none absolute top-0 bottom-0 z-[35]"
+      style={{ left: LABEL_WIDTH + playheadLeft, width: 1 }}
       aria-hidden
     >
-      <div className="absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-fb-playhead shadow-[0_0_8px_rgba(255,255,255,0.45)]" />
+      <div className="absolute inset-y-0 left-0 w-px bg-fb-playhead/80" />
+      <div className="sticky top-0 -ml-1.5 flex w-3 justify-center">
+        <div className="h-2.5 w-2.5 shrink-0 rounded-full bg-fb-playhead shadow-[0_0_8px_rgba(255,255,255,0.45)]" />
+      </div>
     </div>
   )
 }
@@ -1249,10 +1349,12 @@ export function TimelinePanel() {
         viewport.scrollLeft + cursorOffset - LABEL_WIDTH - TIMELINE_X_INSET,
         pixelsPerSecond,
       )
+      const zoomStep =
+        pixelsPerSecond < 120 ? 10 : pixelsPerSecond < 400 ? 25 : 40
       const nextPixelsPerSecond = clamp(
-        pixelsPerSecond + direction * 10,
-        20,
-        240,
+        pixelsPerSecond + direction * zoomStep,
+        TIMELINE_MIN_PPS,
+        TIMELINE_MAX_PPS,
       )
       if (nextPixelsPerSecond === pixelsPerSecond) return
       setPixelsPerSecond(nextPixelsPerSecond)
@@ -1283,27 +1385,18 @@ export function TimelinePanel() {
     viewport.addEventListener('wheel', onWheel, { passive: false })
     return () => viewport.removeEventListener('wheel', onWheel)
   }, [session.structureReady, zoomAtClientX])
-  const rulerMarks = useMemo(() => {
-    const marks: Array<{ ms: number; major: boolean }> = []
-    const stepMs =
-      pixelsPerSecond >= 120
-        ? 500
-        : pixelsPerSecond >= 60
-          ? 1000
-          : pixelsPerSecond >= 40
-            ? 2000
-            : 5000
-    // Stay inside the painted content so ticks can't widen the scroll area
-    // past the ruler background and track lines.
-    const rulerEndMs = pxToMs(
-      Math.max(0, contentWidth - TIMELINE_X_INSET),
-      pixelsPerSecond,
-    )
-    for (let ms = 0; ms <= rulerEndMs; ms += stepMs) {
-      marks.push({ ms, major: ms % (stepMs * 2) === 0 || stepMs >= 2000 })
-    }
-    return marks
-  }, [contentWidth, pixelsPerSecond])
+  const ruler = useMemo(
+    () =>
+      buildRulerMarks(
+        contentWidth,
+        pixelsPerSecond,
+        timelineScrollLeft,
+        viewportWidth,
+      ),
+    [contentWidth, pixelsPerSecond, timelineScrollLeft, viewportWidth],
+  )
+  const rulerMarks = ruler.marks
+  const rulerMinorFrames = ruler.minorFrames
 
   const commitDrag = useCallback(() => {
     const drag = useEditorStore.getState().clipDrag
@@ -1851,8 +1944,8 @@ export function TimelinePanel() {
           />
           <input
             type="range"
-            min={20}
-            max={240}
+            min={TIMELINE_MIN_PPS}
+            max={TIMELINE_MAX_PPS}
             step={10}
             value={pixelsPerSecond}
             onChange={(event) =>
@@ -1925,8 +2018,8 @@ export function TimelinePanel() {
               RULER_HEIGHT + Math.max(displayTracks.length, 1) * TRACK_HEIGHT,
           }}
         >
-          {/* Above the sticky ruler so horizontal scroll never paints ticks over titles */}
-          <div className="sticky top-0 left-0 z-40 border-r border-b border-fb-border bg-fb-ruler" />
+          {/* Above sticky labels so vertical scroll never paints titles over the corner */}
+          <div className="sticky top-0 left-0 z-50 border-r border-b border-fb-border bg-fb-panel" />
 
           <div
             className="sticky top-0 z-30 cursor-ew-resize border-b border-fb-border bg-fb-ruler"
@@ -1937,26 +2030,30 @@ export function TimelinePanel() {
               seekFromClientX(event.clientX)
             }}
           >
-            {rulerMarks.map((mark) => (
-              <div
-                key={mark.ms}
-                className="absolute top-0 h-full"
-                style={{
-                  left: TIMELINE_X_INSET + msToPx(mark.ms, pixelsPerSecond),
-                }}
-              >
+            {rulerMarks.map((mark) => {
+              const tickClass =
+                mark.level === 'major'
+                  ? 'h-full bg-white/35'
+                  : mark.level === 'medium'
+                    ? 'mt-[11px] h-[calc(100%-11px)] bg-white/22'
+                    : 'mt-[20px] h-[calc(100%-20px)] bg-white/12'
+              return (
                 <div
-                  className={`w-px bg-fb-border-strong ${
-                    mark.major ? 'h-full' : 'mt-3 h-[calc(100%-12px)]'
-                  }`}
-                />
-                {mark.major && (
-                  <span className="absolute top-1 left-1 font-mono text-[9px] text-fb-subtle">
-                    {formatTimecode(mark.ms)}
-                  </span>
-                )}
-              </div>
-            ))}
+                  key={mark.ms}
+                  className="absolute top-0 h-full"
+                  style={{
+                    left: TIMELINE_X_INSET + msToPx(mark.ms, pixelsPerSecond),
+                  }}
+                >
+                  <div className={`w-px ${tickClass}`} />
+                  {mark.level === 'major' && (
+                    <span className="absolute top-0.5 left-1.5 whitespace-nowrap font-mono text-[9px] leading-none tracking-tight text-fb-muted">
+                      {formatRulerLabel(mark.ms, rulerMinorFrames)}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
           </div>
 
           <div className="sticky left-0 z-40 border-r border-fb-border bg-fb-panel">
@@ -2200,17 +2297,22 @@ export function TimelinePanel() {
 
           {hoverPlayheadLeft != null && (
             <div
-              className={`pointer-events-none absolute top-0 bottom-0 z-30 w-px ${
-                timelineTool === 'cut' ? 'bg-[#ff5c5c]' : 'bg-fb-playhead/35'
-              }`}
-              style={{ left: LABEL_WIDTH + hoverPlayheadLeft }}
+              className="pointer-events-none absolute top-0 bottom-0 z-[35]"
+              style={{ left: LABEL_WIDTH + hoverPlayheadLeft, width: 1 }}
               aria-hidden
             >
               <div
-                className={`absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full ${
+                className={`absolute inset-y-0 left-0 w-px ${
                   timelineTool === 'cut' ? 'bg-[#ff5c5c]' : 'bg-fb-playhead/35'
                 }`}
               />
+              <div className="sticky top-0 -ml-1.5 flex w-3 justify-center">
+                <div
+                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+                    timelineTool === 'cut' ? 'bg-[#ff5c5c]' : 'bg-fb-playhead/35'
+                  }`}
+                />
+              </div>
             </div>
           )}
 

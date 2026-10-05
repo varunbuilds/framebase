@@ -6,8 +6,8 @@
   --font-mono: "Onest", sans-serif;
 
   --color-fb-app: #07090b;
-  --color-fb-panel: #0b1016;
-  --color-fb-surface: #10161c;
+  --color-fb-panel: #12181f;
+  --color-fb-surface: #171e26;
   --color-fb-border: #2a3136;
   --color-fb-border-strong: #3d474d;
   --color-fb-text: #f3f4f4;
@@ -167,6 +167,10 @@ html.media-dragging * {
 }
 
 ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-corner {
   background: transparent;
 }
 
