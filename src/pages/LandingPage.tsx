@@ -242,8 +242,8 @@ export function LandingPage() {
 
   const placeSignBox = (event: { currentTarget: HTMLDivElement }) => {
     const root = rootRef.current
-    const link = event.currentTarget.querySelector('a')
-    if (!root || !link) return
+    const link = event.currentTarget.querySelector('a, button')
+    if (!root || !(link instanceof HTMLElement)) return
     const frame = root.getBoundingClientRect()
     const box = link.getBoundingClientRect()
     root.style.setProperty('--sign-top', `${box.top - frame.top}px`)

@@ -1,5 +1,5 @@
 import { getRouteApi, Link, useNavigate, useRouter } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { NewProjectDialog } from '@/components/projects/NewProjectDialog'
 import { WorkspaceAccess } from '@/components/projects/WorkspaceAccess'
 import { AppChrome } from '@/components/layout/AppChrome'
@@ -44,6 +44,21 @@ export function ProjectsPage() {
   const [error, setError] = useState<string | null>(null)
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [signOpen, setSignOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  const placeSignBox = (event: { currentTarget: HTMLDivElement }) => {
+    const root = rootRef.current
+    const link = event.currentTarget.querySelector('a, button')
+    if (!root || !(link instanceof HTMLElement)) return
+    const frame = root.getBoundingClientRect()
+    const box = link.getBoundingClientRect()
+    root.style.setProperty('--sign-top', `${box.top - frame.top}px`)
+    root.style.setProperty('--sign-right', `${frame.right - box.right}px`)
+    root.style.setProperty('--sign-width', `${box.width}px`)
+    root.style.setProperty('--sign-height', `${box.height}px`)
+    setSignOpen(true)
+  }
 
   const onCreate = async (project: {
     name: string
@@ -95,22 +110,36 @@ export function ProjectsPage() {
   }
 
   return (
-    <AppChrome className="flex h-dvh flex-col overflow-hidden">
-      <header className="relative z-[1] flex h-[74px] shrink-0 items-center justify-between px-9">
-        <Link to="/" className="no-underline">
-          <img className="app-mark" src={logo} alt="Framebase" />
-        </Link>
-        <div className="flex items-center gap-4">
-          <span className="max-w-[220px] truncate text-[12px] tracking-[0.04em] text-[rgba(243,244,244,0.55)]">
-            {user?.email}
-          </span>
-          <button type="button" onClick={() => void onLogout()} className="app-btn-quiet">
+    <AppChrome className="flex h-dvh flex-col overflow-hidden" signOpen={signOpen} rootRef={rootRef}>
+      <header className="landing-header">
+        <img
+          className="landing-mark"
+          src={logo}
+          alt=""
+          role="link"
+          tabIndex={0}
+          onClick={() => void navigate({ to: '/' })}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              void navigate({ to: '/' })
+            }
+          }}
+        />
+        <div
+          className="landing-contact"
+          onPointerEnter={placeSignBox}
+          onPointerLeave={() => setSignOpen(false)}
+          onFocusCapture={placeSignBox}
+          onBlurCapture={() => setSignOpen(false)}
+        >
+          <button type="button" className="landing-contact-link" onClick={() => void onLogout()}>
             Log out
           </button>
         </div>
       </header>
 
-      <div className="relative z-[1] mx-auto flex w-full max-w-[1080px] flex-1 flex-col overflow-auto px-9 py-8">
+      <div className="relative z-[1] mx-auto flex w-full max-w-[1080px] flex-1 flex-col overflow-auto px-9 pb-8 pt-[88px]">
         <WorkspaceAccess />
 
         {library ? (

@@ -70,9 +70,6 @@ export function EditorShell() {
       data-theme="dark"
       className="app-stage relative flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-[#07090b] text-[#f3f4f4]"
     >
-      <div className="app-grain" aria-hidden="true" />
-      <div className="app-edge app-edge-left" aria-hidden="true" />
-      <div className="app-edge app-edge-right" aria-hidden="true" />
       <TopToolbar />
       <CollabConnectionBanner />
       <WorkspaceConnectionBanner />
