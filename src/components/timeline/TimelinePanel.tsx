@@ -1867,7 +1867,7 @@ export function TimelinePanel() {
             title="Select (V)"
             className={`inline-flex h-7 w-7 items-center justify-center rounded-md ${
               timelineTool === 'select'
-                ? 'bg-white/[0.12] text-fb-text'
+                ? 'bg-fb-accent/20 text-fb-accent'
                 : 'text-fb-muted hover:bg-white/[0.06] hover:text-fb-text'
             }`}
           >
@@ -1881,7 +1881,7 @@ export function TimelinePanel() {
             title="Cut. Click a clip to split it (C). Ctrl+K or ⌘K splits at the playhead"
             className={`inline-flex h-7 w-7 items-center justify-center rounded-md ${
               timelineTool === 'cut'
-                ? 'bg-white/[0.12] text-fb-text'
+                ? 'bg-fb-accent/20 text-fb-accent'
                 : 'text-fb-muted hover:bg-white/[0.06] hover:text-fb-text'
             }`}
           >
@@ -1953,7 +1953,7 @@ export function TimelinePanel() {
             }
             aria-label="Timeline zoom"
             title={`${pixelsPerSecond}px/s`}
-            className="h-1.5 w-28 cursor-pointer appearance-none rounded-full bg-fb-border accent-fb-accent [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-fb-text"
+            className="h-1.5 w-28 cursor-pointer appearance-none rounded-full bg-fb-border accent-fb-accent [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-fb-accent"
           />
           <ZoomIn
             size={12}

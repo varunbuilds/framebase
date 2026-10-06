@@ -50,8 +50,8 @@ function LocalMotion() {
         closeOnSelect={false}
         physics
         drift={0.5}
-        folderColor="#1c4b78"
-        frontColor="#3f82c7"
+        folderColor="#1a3350"
+        frontColor="#3e7ecc"
         paperColor="#d7e4f0"
         itemColor="#f4f4f4"
         itemTextColor="#11181d"

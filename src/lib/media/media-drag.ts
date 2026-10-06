@@ -26,8 +26,8 @@ function mountCountDragImage(dataTransfer: DataTransfer, count: number) {
 
   const layers = [
     'inset:16px 22px 0 8px;background:#273239',
-    'inset:10px 14px 8px 2px;background:#1c3852',
-    'inset:4px 8px 14px 0;background:#1c4b78;border:1px solid #2d74b9',
+    'inset:10px 14px 8px 2px;background:#152a48',
+    'inset:4px 8px 14px 0;background:#1a3350;border:1px solid #3e7ecc',
   ]
   for (const layer of layers) {
     const card = document.createElement('div')
@@ -46,7 +46,7 @@ function mountCountDragImage(dataTransfer: DataTransfer, count: number) {
     'padding:0 7px',
     'box-sizing:border-box',
     'border-radius:999px',
-    'background:#3f82c7',
+    'background:#3e7ecc',
     'color:#fff',
     'font:700 13px Onest,sans-serif',
     'letter-spacing:0',

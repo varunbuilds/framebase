@@ -28,7 +28,7 @@ export const EMPTY_EDITOR_PRESENCE: EditorPresence = {
 }
 
 const COLLABORATOR_COLORS = [
-  '#5b9fd4',
+  '#3e7ecc',
   '#3dbe8c',
   '#e07a6a',
   '#e2b15a',

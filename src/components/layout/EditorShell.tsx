@@ -89,7 +89,7 @@ export function EditorShell() {
                   aria-label={label}
                   aria-pressed={selected}
                   onClick={() => selectTool(id)}
-                  className={`inline-flex h-9 w-9 items-center justify-center rounded-md transition-colors ${selected ? 'bg-white/[0.09] text-white' : 'text-white/45 hover:bg-white/[0.05] hover:text-white/75'}`}
+                  className={`inline-flex h-9 w-9 items-center justify-center rounded-md transition-colors ${selected ? 'bg-fb-accent/20 text-fb-accent' : 'text-white/45 hover:bg-white/[0.05] hover:text-white/75'}`}
                 >
                   <Icon size={18} strokeWidth={1.6} />
                 </button>

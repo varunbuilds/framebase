@@ -13,11 +13,11 @@
   --color-fb-text: #f3f4f4;
   --color-fb-muted: #a9b0b3;
   --color-fb-subtle: #7d868a;
-  --color-fb-accent: #3f82c7;
-  --color-fb-accent-soft: #1c3852;
+  --color-fb-accent: #3e7ecc;
+  --color-fb-accent-soft: #152a48;
   --color-fb-danger: #e06666;
-  --color-fb-video: #1c4b78;
-  --color-fb-video-border: #2d74b9;
+  --color-fb-video: #1a3350;
+  --color-fb-video-border: #3e7ecc;
   --color-fb-audio: #174c3d;
   --color-fb-audio-border: #1e8a67;
   --color-fb-ruler: #10171b;
@@ -100,7 +100,7 @@ html.media-dragging * {
   border-radius: 999px;
   background: linear-gradient(
     to right,
-    var(--color-fb-text) var(--volume-pct),
+    var(--color-fb-accent) var(--volume-pct),
     var(--color-fb-border) var(--volume-pct)
   );
 }
@@ -113,7 +113,7 @@ html.media-dragging * {
   margin-top: -4px;
   border: 0;
   border-radius: 999px;
-  background: var(--color-fb-text);
+  background: var(--color-fb-accent);
   opacity: 0;
 }
 
@@ -132,7 +132,7 @@ html.media-dragging * {
 .volume-slider::-moz-range-progress {
   height: 4px;
   border-radius: 999px;
-  background: var(--color-fb-text);
+  background: var(--color-fb-accent);
 }
 
 .volume-slider::-moz-range-thumb {
@@ -140,7 +140,7 @@ html.media-dragging * {
   height: 12px;
   border: 0;
   border-radius: 999px;
-  background: var(--color-fb-text);
+  background: var(--color-fb-accent);
   opacity: 0;
 }
 
@@ -655,8 +655,8 @@ html.media-dragging * {
 }
 
 .landing-feedback textarea:focus-visible {
-  border-color: #3f82c7;
-  background: rgba(63, 130, 199, 0.08);
+  border-color: #3e7ecc;
+  background: rgba(62, 126, 204, 0.08);
 }
 
 .landing-feedback textarea::placeholder {
@@ -681,7 +681,7 @@ html.media-dragging * {
   padding: 10px 18px;
   border: 0;
   border-radius: 0;
-  background: #3f82c7;
+  background: #3e7ecc;
   color: #f4f4f4;
   font: inherit;
   font-size: 13px;
@@ -694,11 +694,11 @@ html.media-dragging * {
 }
 
 .landing-feedback button:hover:not(:disabled):not(.is-sent) {
-  background: #4d92d6;
+  background: #5290d8;
 }
 
 .landing-feedback button:active:not(.is-sent) {
-  background: #356fad;
+  background: #3369ad;
 }
 
 .landing-feedback button.is-sent {
@@ -884,8 +884,8 @@ html.media-dragging * {
 .motion-clip {
   width: 34%;
   border-radius: 4px;
-  background: #1c4b78;
-  box-shadow: inset 0 0 0 1px #2d74b9;
+  background: #1a3350;
+  box-shadow: inset 0 0 0 1px #3e7ecc;
 }
 
 .motion-clip.is-long {
@@ -1534,8 +1534,8 @@ html.media-dragging * {
 }
 
 .app-field:focus-visible {
-  border-color: #3f82c7;
-  background: rgba(63, 130, 199, 0.08);
+  border-color: #3e7ecc;
+  background: rgba(62, 126, 204, 0.08);
 }
 
 .app-label {

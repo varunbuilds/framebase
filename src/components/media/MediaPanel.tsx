@@ -280,7 +280,7 @@ export function MediaPanel() {
                   <div
                     className={`group relative rounded-md border p-1 ${
                       selected
-                        ? 'border-fb-accent/70 bg-fb-accent-soft'
+                        ? 'border-fb-accent bg-fb-accent/15'
                         : 'border-transparent'
                     }`}
                   >

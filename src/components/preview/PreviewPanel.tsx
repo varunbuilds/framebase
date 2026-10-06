@@ -232,7 +232,11 @@ export function PreviewPanel() {
             aria-label={silent ? 'Unmute' : 'Mute'}
             aria-pressed={silent}
             title={silent ? 'Unmute' : 'Mute'}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-white/65 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-md disabled:cursor-not-allowed disabled:opacity-40 ${
+              silent
+                ? 'bg-fb-accent/20 text-fb-accent'
+                : 'text-white/65 hover:bg-white/[0.08]'
+            }`}
           >
             <VolumeIcon size={15} strokeWidth={1.75} />
           </button>
