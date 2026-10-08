@@ -21,7 +21,7 @@ const RULER_TICKS = Array.from({ length: 33 }, (_, index) => ({
 const PRESENCE = [
   { name: 'Neel', color: '#3b97ff', top: '18%', left: '50%', delay: '0s' },
   { name: 'Rob', color: '#2fce86', top: '80%', left: '38%', delay: '-2.4s' },
-  { name: 'Marc', color: '#ff6f93', top: '22%', left: '12%', delay: '-4.6s' },
+  { name: 'Marc', color: '#ff6f93', top: '12%', left: '12%', delay: '-4.6s' },
 ] as const
 
 const FAQ = [
