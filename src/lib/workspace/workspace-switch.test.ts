@@ -148,7 +148,7 @@ describe('workspace switching', () => {
     const untouched = await original.openDirectory('projects')
     expect(await untouched!.openDirectory(CREATED_ID, { create: false })).toBeNull()
     expect(managerSource).toContain('handle = stored')
-    expect(managerSource).toContain('await browserHandleStore().write(stored)')
+    expect(managerSource).toContain('store.write(stored)')
     expect(projectsSource).toContain('getConnectedProjectIds')
     expect(projectsSource).toContain('localProjectIds.includes(project.id)')
   })

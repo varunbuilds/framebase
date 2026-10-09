@@ -26,6 +26,8 @@ export function WorkspaceAccess() {
   }
 
   const folder = workspace.folderName ?? 'this folder'
+  const settled = workspace.status === 'ready' || workspace.status === 'restoring'
+  if (settled) return null
 
   return (
     <section className="app-panel mb-8 px-4 py-4">
@@ -67,16 +69,7 @@ export function WorkspaceAccess() {
             <p className="mt-2 text-[12px] text-fb-danger">{workspace.error}</p>
           ) : null}
         </div>
-        {workspace.status === 'ready' ? (
-          <button
-            type="button"
-            onClick={() => void choose()}
-            disabled={pending}
-            className="app-btn-quiet disabled:opacity-50"
-          >
-            {pending ? 'Opening…' : 'Change'}
-          </button>
-        ) : workspace.status === 'needs-permission' ? (
+        {workspace.status === 'needs-permission' ? (
           <div className="flex items-center gap-2">
             <button
               type="button"

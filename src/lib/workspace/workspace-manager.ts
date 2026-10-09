@@ -18,6 +18,7 @@ import {
 } from './workspace-layout'
 import { createWorkspaceMediaStore } from './workspace-media-store'
 import { readWorkspacePointer, writeWorkspacePointer } from './workspace-pointer'
+import { knownWorkspaceViews, type KnownWorkspaceView } from './workspace-registry'
 import {
   restoreStoredWorkspace,
   type StoredDirectoryHandle,
@@ -38,6 +39,8 @@ let info: WorkspaceFile | null = null
 let handle: StoredDirectoryHandle | null = null
 let snapshot: WorkspaceSnapshot = initialSnapshot()
 let connectedProjectIds: readonly string[] = []
+let known: readonly KnownWorkspaceView[] = []
+const handleDirectories = new WeakMap<StoredDirectoryHandle, WorkspaceDirectory>()
 const listeners = new Set<() => void>()
 let handleStore: WorkspaceHandleStore<StoredDirectoryHandle> | null = null
 let restorePromise: Promise<void> | null = null
@@ -58,6 +61,18 @@ export function setWorkspaceHandleStore(
 ): void {
   handleStore = store
   restorePromise = null
+}
+
+/** Tests attach a directory to a handle. The browser uses the real handle. */
+export function associateWorkspaceHandle(
+  stored: StoredDirectoryHandle,
+  directory: WorkspaceDirectory,
+): void {
+  handleDirectories.set(stored, directory)
+}
+
+export function getKnownWorkspaces(): readonly KnownWorkspaceView[] {
+  return known
 }
 
 function initialSnapshot(): WorkspaceSnapshot {
@@ -101,7 +116,14 @@ export function isWorkspaceReady(): boolean {
 }
 
 /** Connects a directory the caller already holds. Does not delete any folder. */
-export async function connectWorkspace(directory: WorkspaceDirectory): Promise<WorkspaceFile> {
+export async function connectWorkspace(
+  directory: WorkspaceDirectory,
+  mode: 'create' | 'existing' = 'create',
+): Promise<WorkspaceFile> {
+  const previousRoot = root
+  const previousInfo = info
+  const previousIds = connectedProjectIds
+  const previousSnapshot = snapshot
   connectedProjectIds = []
   publish({
     ...snapshot,
@@ -110,22 +132,41 @@ export async function connectWorkspace(directory: WorkspaceDirectory): Promise<W
     workspaceId: null,
     error: null,
   })
-  const opened = await openOrCreateWorkspace(directory)
-  root = directory
-  info = opened
-  bindWorkspaceStores(
-    createWorkspaceMediaStore(directory),
-    createWorkspaceCacheStore(directory),
-  )
-  connectedProjectIds = (await listWorkspaceProjects(directory)).map((project) => project.id)
-  remember(opened)
-  publish({
-    status: 'ready',
-    folderName: directory.name,
-    workspaceId: opened.id,
-    error: null,
-  })
-  return opened
+  try {
+    const opened =
+      mode === 'existing'
+        ? await openExistingWorkspace(directory)
+        : await openOrCreateWorkspace(directory)
+    root = directory
+    info = opened
+    bindWorkspaceStores(
+      createWorkspaceMediaStore(directory),
+      createWorkspaceCacheStore(directory),
+    )
+    connectedProjectIds = (await listWorkspaceProjects(directory)).map((project) => project.id)
+    remember(opened)
+    publish({
+      status: 'ready',
+      folderName: directory.name,
+      workspaceId: opened.id,
+      error: null,
+    })
+    return opened
+  } catch (error) {
+    root = previousRoot
+    info = previousInfo
+    connectedProjectIds = previousIds
+    if (previousRoot) {
+      bindWorkspaceStores(
+        createWorkspaceMediaStore(previousRoot),
+        createWorkspaceCacheStore(previousRoot),
+      )
+    } else {
+      bindWorkspaceStores(null, null)
+    }
+    publish(previousSnapshot)
+    throw error
+  }
 }
 
 /**
@@ -157,20 +198,11 @@ export async function chooseWorkspace(): Promise<boolean> {
   if (!granted) {
     publish({
       ...snapshot,
-      status: 'needs-permission',
-      folderName: picked.name,
       error: 'Framebase needs permission to use this folder.',
     })
     return false
   }
-  try {
-    handle = stored
-    await connectWorkspace(directoryFromHandle(picked))
-    await browserHandleStore().write(stored)
-    return true
-  } catch (error) {
-    return failHandle(error)
-  }
+  return activateDirectory(directoryFor(stored), stored, 'create')
 }
 
 /** Re-grants access from a user click. Does not run on refresh. */
@@ -188,18 +220,111 @@ export async function reconnectWorkspace(): Promise<boolean> {
       })
       return false
     }
-    try {
-      const directory = directoryFromHandle(saved as unknown as FileSystemDirectoryHandle)
-      await openExistingWorkspace(directory)
-      handle = saved
-      await connectWorkspace(directory)
-      await browserHandleStore().write(saved)
-      return true
-    } catch (error) {
-      return failHandle(error)
-    }
+    return activateDirectory(directoryFor(saved), saved, 'existing')
   }
   return chooseWorkspace()
+}
+
+/** Switches to a workspace the user already selected. Does not copy or delete files. */
+export async function switchToKnownWorkspace(workspaceId: string): Promise<boolean> {
+  if (workspaceId === snapshot.workspaceId && snapshot.status === 'ready') return true
+  const entries = await browserHandleStore().list()
+  const entry = entries.find((item) => item.workspaceId === workspaceId)
+  if (!entry) return false
+  const granted = await requestWritePermission(entry.handle).catch(() => false)
+  if (!granted) {
+    await browserHandleStore().saveEntry({ ...entry, availability: 'needs-permission' })
+    await syncKnownViews()
+    publish({
+      ...snapshot,
+      error: `Framebase needs permission to open ${entry.name}.`,
+    })
+    return false
+  }
+  const switched = await activateDirectory(directoryFor(entry.handle), entry.handle, 'existing')
+  if (!switched) {
+    const latest = (await browserHandleStore().list()).find((item) => item.workspaceId === workspaceId)
+    if (latest) {
+      await browserHandleStore().saveEntry({ ...latest, availability: 'unavailable' })
+      await syncKnownViews()
+    }
+  }
+  return switched
+}
+
+/** Drops a workspace from the recent list. Files and cloud projects stay. */
+export async function forgetKnownWorkspace(workspaceId: string): Promise<void> {
+  await browserHandleStore().removeEntry(workspaceId)
+  await syncKnownViews()
+}
+
+/** Explicit selection after the folder has already been picked and permitted. */
+export async function selectWorkspaceDirectory(
+  directory: WorkspaceDirectory,
+  stored: StoredDirectoryHandle,
+): Promise<boolean> {
+  associateWorkspaceHandle(stored, directory)
+  return activateDirectory(directory, stored, 'create')
+}
+
+async function activateDirectory(
+  directory: WorkspaceDirectory,
+  stored: StoredDirectoryHandle,
+  mode: 'create' | 'existing',
+): Promise<boolean> {
+  const previousHandle = handle
+  const previousInfo = info
+  try {
+    const opened = await connectWorkspace(directory, mode)
+    handle = stored
+    const store = browserHandleStore()
+    if (previousHandle && previousInfo && previousInfo.id !== opened.id) {
+      await store.saveEntry({
+        workspaceId: previousInfo.id,
+        handle: previousHandle,
+        name: previousInfo.name,
+        lastUsedAt: new Date(Date.now() - 1).toISOString(),
+        availability: 'available',
+      })
+    }
+    await store.write(stored)
+    await store.saveEntry({
+      workspaceId: opened.id,
+      handle: stored,
+      name: opened.name,
+      lastUsedAt: new Date().toISOString(),
+      availability: 'available',
+    })
+    await syncKnownViews()
+    return true
+  } catch (error) {
+    const message =
+      error instanceof WorkspaceFormatError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : 'Could not use that folder as a workspace.'
+    publish({ ...snapshot, error: message })
+    await syncKnownViews()
+    return false
+  }
+}
+
+function directoryFor(stored: StoredDirectoryHandle): WorkspaceDirectory {
+  return (
+    handleDirectories.get(stored) ??
+    directoryFromHandle(stored as unknown as FileSystemDirectoryHandle)
+  )
+}
+
+async function syncKnownViews(): Promise<void> {
+  const entries = await browserHandleStore().list()
+  const active =
+    snapshot.workspaceId && snapshot.folderName
+      ? { workspaceId: snapshot.workspaceId, name: snapshot.folderName }
+      : null
+  known = knownWorkspaceViews(entries, active)
+  publish({ ...snapshot })
 }
 
 /**
@@ -254,6 +379,7 @@ export function releaseWorkspaceConnection(): void {
   root = null
   handle = null
   connectedProjectIds = []
+  known = []
   bindWorkspaceStores(null, null)
   const pointer =
     typeof window === 'undefined' ? null : readWorkspacePointer(window.localStorage)
@@ -274,11 +400,11 @@ async function restorePersistedWorkspace(): Promise<void> {
   }
   const result = await restoreStoredWorkspace({
     readHandle: () => browserHandleStore().read(),
-    openDirectory: async (saved) =>
-      directoryFromHandle(saved as unknown as FileSystemDirectoryHandle),
+    openDirectory: async (saved) => directoryFor(saved),
   })
   if (result.status === 'none') {
     publish({ status: 'none', folderName: null, workspaceId: null, error: null })
+    await syncKnownViews()
     return
   }
   if (result.status === 'needs-permission') {
@@ -289,6 +415,7 @@ async function restorePersistedWorkspace(): Promise<void> {
       workspaceId: snapshot.workspaceId,
       error: null,
     })
+    await syncKnownViews()
     return
   }
   if (result.status === 'invalid') {
@@ -299,35 +426,18 @@ async function restorePersistedWorkspace(): Promise<void> {
       workspaceId: null,
       error: result.message,
     })
+    await syncKnownViews()
     return
   }
   handle = result.handle
   await connectWorkspace(result.directory)
+  await syncKnownViews()
 }
 
 async function requestWritePermission(next: StoredDirectoryHandle): Promise<boolean> {
   const mode = { mode: 'readwrite' as const }
   if ((await next.queryPermission(mode)) === 'granted') return true
   return (await next.requestPermission(mode)) === 'granted'
-}
-
-function failHandle(error: unknown): boolean {
-  handle = null
-  bindWorkspaceStores(null, null)
-  root = null
-  connectedProjectIds = []
-  const message =
-    error instanceof WorkspaceFormatError
-      ? error.message
-      : error instanceof Error
-        ? error.message
-        : 'Could not use that folder as a workspace.'
-  publish({
-    ...snapshot,
-    status: 'needs-permission',
-    error: message,
-  })
-  return false
 }
 
 function remember(opened: WorkspaceFile): void {

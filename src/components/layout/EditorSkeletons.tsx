@@ -67,3 +67,17 @@ export function InspectorSkeleton() {
     </div>
   )
 }
+
+export function ProjectCardsSkeleton() {
+  return (
+    <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-hidden>
+      {Array.from({ length: 6 }, (_, index) => (
+        <li key={index} className="app-panel flex min-h-[148px] flex-col p-4">
+          <Bone className="h-4 w-2/3" />
+          <Bone className="mt-3 h-3 w-1/2" />
+          <Bone className="mt-auto h-8 w-16" />
+        </li>
+      ))}
+    </ul>
+  )
+}

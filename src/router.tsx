@@ -1,3 +1,8 @@
+import { isSupabaseConfigured } from '@/lib/supabase/client'
+import { authRedirectLocation } from '@/features/auth/redirect'
+import { AuthenticatedOutlet } from '@/features/auth/AuthenticatedOutlet'
+import { authGateResult } from '@/features/auth/route-loading'
+import { readAuthSession } from '@/features/auth/session'
 import {
   createRootRoute,
   createRoute,
@@ -6,9 +11,6 @@ import {
   Outlet,
   redirect,
 } from '@tanstack/react-router'
-import { isSupabaseConfigured } from '@/lib/supabase/client'
-import { authRedirectLocation } from '@/features/auth/redirect'
-import { readAuthSession } from '@/features/auth/session'
 import { ProjectNotFoundError, fetchProject, listProjects } from '@/features/projects/repository'
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
 import { LandingPage } from '@/pages/LandingPage'
@@ -17,7 +19,7 @@ import { SignupPage } from '@/pages/SignupPage'
 import { ProjectsPage } from '@/pages/ProjectsPage'
 import { EditorLoadError, EditorNotFound, EditorPage } from '@/pages/EditorPage'
 import { JoinPage } from '@/pages/JoinPage'
-import { RouteError, SessionLoading } from '@/pages/RouteStates'
+import { AuthenticatedPending, RouteError } from '@/pages/RouteStates'
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -77,16 +79,20 @@ const authenticatedRoute = createRoute({
       throw new Error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY')
     }
     const session = await readAuthSession()
-    if (!session) {
+    const gate = authGateResult(session)
+    if (gate.kind === 'redirect-login') {
       throw redirect({
         to: '/login',
         search: { redirect: location.pathname },
       })
     }
-    return { userId: session.user.id }
+    return { userId: gate.userId }
   },
-  pendingComponent: SessionLoading,
+  component: AuthenticatedOutlet,
+  pendingComponent: AuthenticatedPending,
   pendingMs: 0,
+  pendingMinMs: 0,
+  errorComponent: ({ error }) => <RouteError error={error} />,
 })
 
 const projectsRoute = createRoute({
@@ -94,7 +100,9 @@ const projectsRoute = createRoute({
   path: '/projects',
   loader: () => listProjects(),
   component: ProjectsPage,
-  pendingComponent: SessionLoading,
+  pendingComponent: AuthenticatedPending,
+  pendingMs: 0,
+  pendingMinMs: 0,
   errorComponent: ({ error }) => <RouteError error={error} />,
 })
 
@@ -110,7 +118,9 @@ const editorRoute = createRoute({
     }
   },
   component: EditorPage,
-  pendingComponent: SessionLoading,
+  pendingComponent: AuthenticatedPending,
+  pendingMs: 0,
+  pendingMinMs: 0,
   notFoundComponent: EditorNotFound,
   errorComponent: ({ error }) => <EditorLoadError error={error} />,
 })
@@ -133,6 +143,7 @@ const routeTree = rootRoute.addChildren([
 export const router = createRouter({
   routeTree,
   defaultPendingMs: 0,
+  defaultPendingMinMs: 0,
 })
 
 declare module '@tanstack/react-router' {

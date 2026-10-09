@@ -1,4 +1,4 @@
-import { getRouteApi, Link } from '@tanstack/react-router'
+import { getRouteApi, Link, useRouter } from '@tanstack/react-router'
 import { AppChrome } from '@/components/layout/AppChrome'
 import { useEffect, useRef, useState } from 'react'
 import { EditorShell } from '@/components/layout/EditorShell'
@@ -197,6 +197,7 @@ export function EditorNotFound() {
 }
 
 export function EditorLoadError({ error }: { error: unknown }) {
+  const router = useRouter()
   const message = error instanceof Error ? error.message : 'Could not open this project'
   return (
     <AppChrome>
@@ -206,9 +207,14 @@ export function EditorLoadError({ error }: { error: unknown }) {
             Could not open this project
           </h1>
           <p className="mt-3 max-w-[42ch] text-[15px] text-fb-danger">{message}</p>
-          <Link to="/projects" className="app-btn mt-8">
-            Back to projects
-          </Link>
+          <div className="mt-8 flex items-center justify-center gap-3">
+            <button type="button" className="app-btn" onClick={() => void router.invalidate()}>
+              Try again
+            </button>
+            <Link to="/projects" className="app-btn-quiet">
+              Back to projects
+            </Link>
+          </div>
         </div>
       </main>
     </AppChrome>

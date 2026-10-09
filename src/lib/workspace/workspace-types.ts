@@ -9,9 +9,10 @@ import type { MediaByteStore } from '@/lib/media/media-byte-store'
  * The document never includes files, blobs, object URLs, directory handles,
  * absolute paths, or caches.
  *
- * IndexedDB on this device remembers only the FileSystemDirectoryHandle for
- * the chosen workspace folder. It does not hold media bytes, the project
- * document, caches, credentials, or a filesystem path.
+ * IndexedDB on this device remembers directory handles for workspaces the
+ * user has selected. The current handle is stored separately from that
+ * recent list. IndexedDB does not hold media bytes, the project document,
+ * caches, credentials, or a filesystem path.
  *
  * The workspace folder holds local source media, a local project mirror,
  * thumbnails, and rebuildable caches. project.json mirrors Liveblocks. It

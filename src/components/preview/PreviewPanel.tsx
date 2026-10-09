@@ -48,7 +48,7 @@ function PreviewGap() {
   if (!isGap) return null
 
   return (
-    <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-fb-surface">
+    <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black">
       <div className="flex flex-col items-center gap-4 text-center">
         <span className="grid h-14 w-20 place-items-center before:absolute before:h-4 before:w-4 before:border-t before:border-l before:border-white/35 after:absolute after:h-4 after:w-4 after:border-r after:border-b after:border-white/35">
           <span className="text-xl font-light text-white/60">+</span>
@@ -140,7 +140,7 @@ export function PreviewPanel() {
         style={{ containerType: 'size' }}
       >
         <div
-          className="relative overflow-hidden border border-white/[0.12] bg-fb-surface"
+          className="relative overflow-hidden border border-white/[0.12] bg-black"
           style={{
             aspectRatio: `${frameWidth} / ${frameHeight}`,
             width: `min(100%, 760px, calc(min(460px, 100cqh) * ${frameWidth} / ${frameHeight}))`,

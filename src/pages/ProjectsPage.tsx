@@ -1,10 +1,13 @@
 import { useRef, useState, useSyncExternalStore } from 'react'
 import { getRouteApi, Link, useNavigate, useRouter } from '@tanstack/react-router'
 import { NewProjectDialog } from '@/components/projects/NewProjectDialog'
+import { ProjectCardsSkeleton } from '@/components/layout/EditorSkeletons'
+import { WorkspaceSwitcher } from '@/components/projects/WorkspaceSwitcher'
 import { WorkspaceAccess } from '@/components/projects/WorkspaceAccess'
 import { AppChrome } from '@/components/layout/AppChrome'
 import logo from '@/assets/framebase-logo.png'
 import { useAuth } from '@/features/auth/use-auth'
+import { projectsBodyState } from '@/features/auth/route-loading'
 import { releaseProjectMedia } from '@/lib/media/release-project-media'
 import { deleteProjectCloudMedia } from '@/lib/media/publish-source'
 import {
@@ -50,6 +53,11 @@ export function ProjectsPage() {
   const projects = loaded.filter(
     (project) => localProjectIds.includes(project.id) && !removedIds.includes(project.id),
   )
+  const body = projectsBodyState({
+    routePending: false,
+    workspaceStatus: workspace.status,
+    projectCount: library ? projects.length : 0,
+  })
   const [creating, setCreating] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -151,39 +159,45 @@ export function ProjectsPage() {
       </header>
 
       <div className="relative z-[1] mx-auto flex w-full max-w-[1080px] flex-1 flex-col overflow-auto px-9 pb-8 pt-[88px]">
-        <WorkspaceAccess />
-
-        {library ? (
-          <>
-        <div className="mb-8 flex items-end justify-between gap-4">
-          <div>
+        <div className="mb-8">
+          <div className="flex items-center justify-between gap-4">
             <h1 className="text-[40px] font-bold leading-none tracking-[-0.04em] text-[#f4f4f4]">
               Projects
             </h1>
-            <p className="mt-3 text-[15px] text-[rgba(243,244,244,0.72)]">
-              Open a cut, or start an empty timeline.
-            </p>
+            <div className="flex items-stretch gap-3">
+              {workspace.status !== 'unsupported' ? <WorkspaceSwitcher /> : null}
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null)
+                  setDialogOpen(true)
+                }}
+                disabled={!library}
+                className="app-btn h-[36px] min-h-[36px]"
+              >
+                New Project
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setError(null)
-              setDialogOpen(true)
-            }}
-            className="app-btn"
-          >
-            New Project
-          </button>
+          <p className="mt-3 text-[15px] text-[rgba(243,244,244,0.72)]">
+            Open a cut, or start an empty timeline.
+          </p>
         </div>
 
         {error && <p className="mb-4 text-[13px] text-fb-danger">{error}</p>}
 
-        {projects.length === 0 ? (
+        <WorkspaceAccess />
+
+        {body === 'skeleton' ? (
+          <div aria-busy="true">
+            <ProjectCardsSkeleton />
+          </div>
+        ) : body === 'empty' ? (
           <div className="flex flex-1 flex-col items-center justify-center pb-16 text-center">
             <h2 className="text-[18px] font-semibold text-[#f4f4f4]">No projects yet</h2>
             <p className="mt-2 text-[14px] text-[rgba(243,244,244,0.72)]">Create your first project</p>
           </div>
-        ) : (
+        ) : body === 'list' ? (
           <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {projects.map((project) => (
               <li key={project.id} className="app-panel flex min-h-[148px] flex-col p-4">
@@ -232,8 +246,6 @@ export function ProjectsPage() {
               </li>
             ))}
           </ul>
-        )}
-          </>
         ) : null}
       </div>
       {dialogOpen && (
