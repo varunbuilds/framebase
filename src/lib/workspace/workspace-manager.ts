@@ -8,6 +8,7 @@ import {
   type WorkspaceHandleStore,
 } from './workspace-handle-store'
 import {
+  listWorkspaceProjects,
   openExistingWorkspace,
   openOrCreateWorkspace,
   removeProjectDirectory,
@@ -36,6 +37,7 @@ let root: WorkspaceDirectory | null = null
 let info: WorkspaceFile | null = null
 let handle: StoredDirectoryHandle | null = null
 let snapshot: WorkspaceSnapshot = initialSnapshot()
+let connectedProjectIds: readonly string[] = []
 const listeners = new Set<() => void>()
 let handleStore: WorkspaceHandleStore<StoredDirectoryHandle> | null = null
 let restorePromise: Promise<void> | null = null
@@ -90,12 +92,24 @@ export function subscribeWorkspace(listener: () => void): () => void {
   return () => listeners.delete(listener)
 }
 
+export function getConnectedProjectIds(): readonly string[] {
+  return connectedProjectIds
+}
+
 export function isWorkspaceReady(): boolean {
   return snapshot.status === 'ready' && root != null
 }
 
 /** Connects a directory the caller already holds. Does not delete any folder. */
 export async function connectWorkspace(directory: WorkspaceDirectory): Promise<WorkspaceFile> {
+  connectedProjectIds = []
+  publish({
+    ...snapshot,
+    status: 'restoring',
+    folderName: directory.name,
+    workspaceId: null,
+    error: null,
+  })
   const opened = await openOrCreateWorkspace(directory)
   root = directory
   info = opened
@@ -103,6 +117,7 @@ export async function connectWorkspace(directory: WorkspaceDirectory): Promise<W
     createWorkspaceMediaStore(directory),
     createWorkspaceCacheStore(directory),
   )
+  connectedProjectIds = (await listWorkspaceProjects(directory)).map((project) => project.id)
   remember(opened)
   publish({
     status: 'ready',
@@ -204,14 +219,25 @@ export function ensureWorkspaceRestored(): Promise<void> {
   return restorePromise
 }
 
+export async function listConnectedWorkspaceProjects(): Promise<
+  Awaited<ReturnType<typeof listWorkspaceProjects>>
+> {
+  if (!root) return []
+  return listWorkspaceProjects(root)
+}
+
 export async function mirrorCurrentProject(document: ProjectDocument): Promise<void> {
   if (!root) return
   await writeProjectMirror(root, document)
+  connectedProjectIds = (await listWorkspaceProjects(root)).map((project) => project.id)
+  publish({ ...snapshot })
 }
 
 export async function removeWorkspaceProject(projectId: string): Promise<void> {
   if (!root) return
   await removeProjectDirectory(root, projectId)
+  connectedProjectIds = (await listWorkspaceProjects(root)).map((project) => project.id)
+  publish({ ...snapshot })
 }
 
 /** Media ids in this project that no other local project mirror lists. Not a cloud ownership check. */
@@ -227,6 +253,7 @@ export async function localMediaIdsNotMirroredElsewhere(
 export function releaseWorkspaceConnection(): void {
   root = null
   handle = null
+  connectedProjectIds = []
   bindWorkspaceStores(null, null)
   const pointer =
     typeof window === 'undefined' ? null : readWorkspacePointer(window.localStorage)
@@ -288,6 +315,7 @@ function failHandle(error: unknown): boolean {
   handle = null
   bindWorkspaceStores(null, null)
   root = null
+  connectedProjectIds = []
   const message =
     error instanceof WorkspaceFormatError
       ? error.message
@@ -336,6 +364,7 @@ async function refreshPermission(): Promise<void> {
     // queryPermission can fail when the handle is no longer usable.
   }
   root = null
+  connectedProjectIds = []
   bindWorkspaceStores(null, null)
   publish({
     status: 'needs-permission',

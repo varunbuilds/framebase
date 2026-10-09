@@ -268,6 +268,38 @@ async function writeReadmeIfMissing(root: WorkspaceDirectory): Promise<void> {
   await root.writeFile(WORKSPACE_README_FILE, new Blob([README], { type: 'text/markdown' }))
 }
 
+export type LocalProjectListing = {
+  id: string
+  name: string
+  updatedAt: string
+}
+
+/** Projects whose project.json mirror is valid in this folder. Not the cloud list. */
+export async function listWorkspaceProjects(
+  root: WorkspaceDirectory,
+): Promise<LocalProjectListing[]> {
+  const folder = await root.openDirectory(PROJECTS_DIRECTORY, { create: false })
+  if (!folder) return []
+  const projects: LocalProjectListing[] = []
+  for (const entry of await folder.list()) {
+    if (entry.kind !== 'directory' || !isProjectId(entry.name)) continue
+    const projectDir = await folder.openDirectory(entry.name, { create: false })
+    if (!projectDir) continue
+    const payload = await readJson(projectDir, 'project.json')
+    if (typeof payload !== 'object' || payload === null) continue
+    const document = (payload as { document?: { id?: unknown; name?: unknown; updatedAt?: unknown } })
+      .document
+    if (!document || document.id !== entry.name || typeof document.name !== 'string') continue
+    projects.push({
+      id: entry.name,
+      name: document.name,
+      updatedAt: typeof document.updatedAt === 'string' ? document.updatedAt : '',
+    })
+  }
+  projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  return projects
+}
+
 async function refreshWorkspaceIndex(root: WorkspaceDirectory): Promise<void> {
   const projects: WorkspaceIndex['projects'] = []
   const folder = await root.openDirectory(PROJECTS_DIRECTORY, { create: true })

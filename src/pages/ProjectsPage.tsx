@@ -1,5 +1,5 @@
+import { useRef, useState, useSyncExternalStore } from 'react'
 import { getRouteApi, Link, useNavigate, useRouter } from '@tanstack/react-router'
-import { useRef, useState } from 'react'
 import { NewProjectDialog } from '@/components/projects/NewProjectDialog'
 import { WorkspaceAccess } from '@/components/projects/WorkspaceAccess'
 import { AppChrome } from '@/components/layout/AppChrome'
@@ -7,7 +7,11 @@ import logo from '@/assets/framebase-logo.png'
 import { useAuth } from '@/features/auth/use-auth'
 import { releaseProjectMedia } from '@/lib/media/release-project-media'
 import { deleteProjectCloudMedia } from '@/lib/media/publish-source'
-import { mirrorCurrentProject } from '@/lib/workspace/workspace-manager'
+import {
+  getConnectedProjectIds,
+  mirrorCurrentProject,
+  subscribeWorkspace,
+} from '@/lib/workspace/workspace-manager'
 import { useWorkspace } from '@/lib/workspace/use-workspace'
 import { showsProjectLibrary } from '@/lib/workspace/project-library'
 import {
@@ -34,11 +38,18 @@ export function ProjectsPage() {
   const loaded = projectsRoute.useLoaderData()
   const workspace = useWorkspace()
   const library = showsProjectLibrary(workspace.status)
+  const localProjectIds = useSyncExternalStore(
+    subscribeWorkspace,
+    getConnectedProjectIds,
+    getConnectedProjectIds,
+  )
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
   const router = useRouter()
   const [removedIds, setRemovedIds] = useState<string[]>([])
-  const projects = loaded.filter((project) => !removedIds.includes(project.id))
+  const projects = loaded.filter(
+    (project) => localProjectIds.includes(project.id) && !removedIds.includes(project.id),
+  )
   const [creating, setCreating] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
