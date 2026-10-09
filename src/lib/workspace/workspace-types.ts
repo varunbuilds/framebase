@@ -4,30 +4,35 @@ import type { MediaByteStore } from '@/lib/media/media-byte-store'
 /**
  * Storage ownership:
  *
- * Supabase holds auth, project identity, membership, and the ProjectDocument.
- * That document is the shared project state. It never includes files, blobs,
- * object URLs, directory handles, absolute paths, or caches.
+ * Liveblocks Storage is the authoritative collaborative ProjectDocument.
+ * Supabase holds auth, project identity, membership, and cloud media objects.
+ * The document never includes files, blobs, object URLs, directory handles,
+ * absolute paths, or caches.
  *
  * IndexedDB on this device remembers only the FileSystemDirectoryHandle for
  * the chosen workspace folder. It does not hold media bytes, the project
  * document, caches, credentials, or a filesystem path.
  *
- * The workspace folder itself holds local source media, a local project
- * mirror, and rebuildable caches. A mediaSourceId in the document is a shared
+ * The workspace folder holds local source media, a local project mirror,
+ * thumbnails, and rebuildable caches. project.json mirrors Liveblocks. It
+ * does not override it. A mediaSourceId in the document is a shared
  * reference. It does not mean this device has the bytes.
+ *
+ * OPFS is only a legacy/runtime fallback. Persistent user media stays in the
+ * user-selected workspace.
  *
  * Runtime state (File, Blob, object URL, media elements, decoded frames,
  * playback, UI) stays in memory.
- *
- * Future collaboration syncs edits, presence, and timeline state. It does not
- * sync source media or caches. Those stay in Supabase Storage and this folder.
  */
 
-export const WORKSPACE_VERSION = 1 as const
+export const WORKSPACE_SCHEMA_VERSION = 1 as const
 
-/** Identity stored inside the chosen folder. No path, handle, or credentials. */
+/**
+ * Identity of the chosen folder. `name` is the directory name in memory.
+ * The marker file stores schemaVersion, workspaceId, and createdAt only.
+ */
 export type WorkspaceFile = {
-  version: typeof WORKSPACE_VERSION
+  schemaVersion: typeof WORKSPACE_SCHEMA_VERSION
   id: string
   name: string
   createdAt: string

@@ -3,49 +3,68 @@ import {
   type MediaByteStore,
   type StoredMedia,
 } from '@/lib/media/media-byte-store'
-import { openDirectoryPath, readJson } from './directory-path'
+import { openDirectoryPath, readJson, writeJson } from './directory-path'
+import { buildMediaMetadata, hashBlobSha256, parseMediaMetadata } from './media-record'
+import {
+  getMediaDir,
+  getMediaSourceFile,
+  MEDIA_METADATA_FILE,
+  MEDIA_THUMBNAIL_FILE,
+  splitWorkspacePath,
+} from './workspace-paths'
 import type { WorkspaceDirectory } from './workspace-types'
 
-type MediaMetadata = { name: string; mimeType: string }
-
-/** Source bytes at media/<mediaSourceId>/source. The user's original file is only read. */
-export function createWorkspaceMediaStore(mediaRoot: WorkspaceDirectory): MediaByteStore {
+/** Source bytes at media/<id>/source.<ext>, plus metadata and an optional thumbnail. */
+export function createWorkspaceMediaStore(root: WorkspaceDirectory): MediaByteStore {
   return {
     async save(mediaSourceId, file, metadata) {
       assertMediaSourceId(mediaSourceId)
-      const directory = await mediaDirectory(mediaRoot, mediaSourceId, true)
+      const directory = await mediaDirectory(root, mediaSourceId, true)
       if (!directory) throw new Error('Could not create the workspace media folder.')
       const type = metadata.mimeType || file.type || 'application/octet-stream'
-      // Pass the blob through so the file-system writer can stream it.
       const bytes = file.type === type ? file : new Blob([file], { type })
-      await directory.writeFile('source', bytes)
-      await directory.writeFile(
-        'metadata.json',
-        new Blob([
-          JSON.stringify({
-            name: metadata.name,
-            mimeType: bytes.type,
-          } satisfies MediaMetadata),
-        ]),
+      const sourceName = getMediaSourceFile(metadata.name, type)
+      const previous = parseMediaMetadata(
+        await readJson(directory, MEDIA_METADATA_FILE),
+        mediaSourceId,
       )
+      await directory.writeFile(sourceName, bytes)
+      const contentHash = await hashBlobSha256(bytes)
+      const record = buildMediaMetadata({
+        id: mediaSourceId,
+        file: bytes,
+        metadata: { ...metadata, mimeType: type },
+        extension: sourceName.slice('source'.length),
+        contentHash,
+        previous,
+      })
+      await writeJson(directory, MEDIA_METADATA_FILE, record)
+      if (metadata.thumbnail && metadata.thumbnail.size > 0) {
+        await directory.writeFile(MEDIA_THUMBNAIL_FILE, metadata.thumbnail).catch(() => undefined)
+      }
+      await removeLegacySource(directory, sourceName)
     },
     async get(mediaSourceId) {
       assertMediaSourceId(mediaSourceId)
-      const directory = await mediaDirectory(mediaRoot, mediaSourceId, false)
+      const directory = await mediaDirectory(root, mediaSourceId, false)
       if (!directory) return null
-      return readStored(directory)
+      return readStored(directory, mediaSourceId)
     },
     async has(mediaSourceId) {
       assertMediaSourceId(mediaSourceId)
-      const directory = await mediaDirectory(mediaRoot, mediaSourceId, false)
+      const directory = await mediaDirectory(root, mediaSourceId, false)
       if (!directory) return false
-      return (await directory.readFile('source')) != null
+      return (await findSource(directory)) != null
     },
     async delete(mediaSourceId) {
       assertMediaSourceId(mediaSourceId)
+      const mediaRoot = await root.openDirectory('media', { create: false })
+      if (!mediaRoot) return
       await mediaRoot.remove(mediaSourceId, { recursive: true })
     },
     async list() {
+      const mediaRoot = await root.openDirectory('media', { create: false })
+      if (!mediaRoot) return []
       const entries = await mediaRoot.list()
       return entries.filter((entry) => entry.kind === 'directory').map((entry) => entry.name)
     },
@@ -53,29 +72,54 @@ export function createWorkspaceMediaStore(mediaRoot: WorkspaceDirectory): MediaB
 }
 
 async function mediaDirectory(
-  mediaRoot: WorkspaceDirectory,
+  root: WorkspaceDirectory,
   mediaSourceId: string,
   create: boolean,
 ): Promise<WorkspaceDirectory | null> {
-  return openDirectoryPath(mediaRoot, [mediaSourceId], create)
+  return openDirectoryPath(root, splitWorkspacePath(getMediaDir(mediaSourceId)), create)
 }
 
-async function readStored(directory: WorkspaceDirectory): Promise<StoredMedia | null> {
-  const source = await directory.readFile('source')
-  if (!source) return null
-  const metadata = await readMetadata(directory)
-  const mimeType = metadata?.mimeType || source.type || 'application/octet-stream'
+async function readStored(
+  directory: WorkspaceDirectory,
+  mediaSourceId: string,
+): Promise<StoredMedia | null> {
+  const found = await findSource(directory)
+  if (!found) return null
+  const metadata = parseMediaMetadata(await readJson(directory, MEDIA_METADATA_FILE), mediaSourceId)
+  const mimeType = metadata?.mimeType || found.blob.type || 'application/octet-stream'
   return {
-    blob: source.type === mimeType ? source : new Blob([source], { type: mimeType }),
-    name: metadata?.name || 'media',
+    blob: found.blob.type === mimeType ? found.blob : new Blob([found.blob], { type: mimeType }),
+    name: metadata?.fileName || 'media',
     mimeType,
   }
 }
 
-async function readMetadata(directory: WorkspaceDirectory): Promise<MediaMetadata | null> {
-  const parsed = await readJson(directory, 'metadata.json')
-  if (typeof parsed !== 'object' || parsed === null) return null
-  const record = parsed as { name?: unknown; mimeType?: unknown }
-  if (typeof record.name !== 'string' || typeof record.mimeType !== 'string') return null
-  return { name: record.name, mimeType: record.mimeType }
+async function findSource(
+  directory: WorkspaceDirectory,
+): Promise<{ name: string; blob: Blob } | null> {
+  const entries = await directory.list()
+  const named = entries.filter(
+    (entry) => entry.kind === 'file' && /^source\.[A-Za-z0-9]+$/.test(entry.name),
+  )
+  const preferred = named[0]
+  if (preferred) {
+    const blob = await directory.readFile(preferred.name)
+    if (blob) return { name: preferred.name, blob }
+  }
+  const legacy = await directory.readFile('source')
+  if (legacy) return { name: 'source', blob: legacy }
+  return null
+}
+
+async function removeLegacySource(
+  directory: WorkspaceDirectory,
+  sourceName: string,
+): Promise<void> {
+  if (sourceName === 'source') return
+  const legacy = await directory.readFile('source')
+  if (!legacy) return
+  const written = await directory.readFile(sourceName)
+  if (written && written.size === legacy.size) {
+    await directory.remove('source')
+  }
 }

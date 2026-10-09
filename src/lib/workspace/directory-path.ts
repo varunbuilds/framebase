@@ -1,3 +1,4 @@
+import { blobsMatch } from './media-record'
 import type { WorkspaceDirectory } from './workspace-types'
 
 export async function openDirectoryPath(
@@ -29,4 +30,29 @@ export async function writeJson(
     name,
     new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }),
   )
+}
+
+/** Copies files into `to`. Does not delete `from`. Throws before a size mismatch is accepted. */
+export async function copyDirectoryContents(
+  from: WorkspaceDirectory,
+  to: WorkspaceDirectory,
+): Promise<void> {
+  for (const entry of await from.list()) {
+    if (entry.kind === 'file') {
+      const blob = await from.readFile(entry.name)
+      if (!blob) throw new Error(`Missing ${entry.name} while copying the workspace.`)
+      await to.writeFile(entry.name, blob)
+      const written = await to.readFile(entry.name)
+      if (!written || !(await blobsMatch(written, blob))) {
+        throw new Error(`Incomplete copy of ${entry.name}. The original was left in place.`)
+      }
+      continue
+    }
+    const childFrom = await from.openDirectory(entry.name, { create: false })
+    const childTo = await to.openDirectory(entry.name, { create: true })
+    if (!childFrom || !childTo) {
+      throw new Error(`Could not copy ${entry.name}. The original was left in place.`)
+    }
+    await copyDirectoryContents(childFrom, childTo)
+  }
 }

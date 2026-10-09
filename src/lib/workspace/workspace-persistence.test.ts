@@ -25,7 +25,7 @@ import {
 } from './workspace-handle-store'
 import { releaseWorkspaceConnection } from './workspace-manager'
 import { afterWorkspaceRestore, restoreStoredWorkspace, type StoredDirectoryHandle } from './workspace-restore'
-import { openOrCreateWorkspace, workspaceMediaDirectory } from './workspace-layout'
+import { openOrCreateWorkspace } from './workspace-layout'
 import { createWorkspaceMediaStore } from './workspace-media-store'
 
 const PROJECT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -184,7 +184,7 @@ describe('workspace handle persistence', () => {
   it('hydrates local media only after a granted workspace restore', async () => {
     const root = createMemoryDirectory('Framebase')
     await openOrCreateWorkspace(root)
-    const media = createWorkspaceMediaStore(await workspaceMediaDirectory(root))
+    const media = createWorkspaceMediaStore(root)
     await media.save('media_a', new Blob([Uint8Array.from([1, 2, 3])]), {
       name: 'clip.mp4',
       mimeType: 'video/mp4',

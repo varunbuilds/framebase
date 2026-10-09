@@ -16,7 +16,7 @@ export type WorkspaceRestoreResult =
 /**
  * Restores a previously chosen folder. Permission is only queried.
  * requestPermission is left to a later button click. A folder without
- * workspace.json is not initialized.
+ * A folder without a Framebase workspace marker is not initialized.
  */
 export async function restoreStoredWorkspace(args: {
   readHandle: () => Promise<StoredDirectoryHandle | null>

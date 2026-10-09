@@ -11,8 +11,7 @@ import {
   openExistingWorkspace,
   openOrCreateWorkspace,
   removeProjectDirectory,
-  workspaceCacheDirectory,
-  workspaceMediaDirectory,
+  unreferencedMediaIds,
   writeProjectMirror,
   WorkspaceFormatError,
 } from './workspace-layout'
@@ -98,13 +97,11 @@ export function isWorkspaceReady(): boolean {
 /** Connects a directory the caller already holds. Does not delete any folder. */
 export async function connectWorkspace(directory: WorkspaceDirectory): Promise<WorkspaceFile> {
   const opened = await openOrCreateWorkspace(directory)
-  const mediaRoot = await workspaceMediaDirectory(directory)
-  const cacheRoot = await workspaceCacheDirectory(directory)
   root = directory
   info = opened
   bindWorkspaceStores(
-    createWorkspaceMediaStore(mediaRoot),
-    createWorkspaceCacheStore(cacheRoot),
+    createWorkspaceMediaStore(directory),
+    createWorkspaceCacheStore(directory),
   )
   remember(opened)
   publish({
@@ -215,6 +212,15 @@ export async function mirrorCurrentProject(document: ProjectDocument): Promise<v
 export async function removeWorkspaceProject(projectId: string): Promise<void> {
   if (!root) return
   await removeProjectDirectory(root, projectId)
+}
+
+/** Media ids in this project that no other local project mirror lists. Not a cloud ownership check. */
+export async function localMediaIdsNotMirroredElsewhere(
+  projectId: string,
+  mediaIds: string[],
+): Promise<string[]> {
+  if (!root) return mediaIds
+  return unreferencedMediaIds(root, projectId, mediaIds)
 }
 
 /** Drops the in-memory connection. The saved directory handle stays. */

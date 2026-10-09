@@ -2,10 +2,9 @@ import { getDerivedCacheStore } from './derived-cache'
 import { deleteMedia } from './opfs-media-store'
 
 /**
- * Removes source bytes, then derived caches. Cache cleanup cannot delete
- * source bytes because they live in a different directory. A cache cleanup
- * failure does not put the source back, and a source failure skips cache
- * cleanup so a still-present source keeps its caches.
+ * Removes source bytes and derived caches. Workspace caches live inside the
+ * media directory, so deleting that directory removes them. The cache call
+ * still clears a legacy OPFS cache when the workspace copy is already gone.
  */
 export async function deleteStoredMedia(mediaSourceId: string): Promise<void> {
   await deleteMedia(mediaSourceId)

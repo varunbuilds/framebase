@@ -11,9 +11,28 @@ export type StoredMedia = {
   mimeType: string
 }
 
+/**
+ * Facts known at import or download time. Omitted fields are unknown —
+ * the workspace record must not invent them.
+ */
 export type MediaWrite = {
   name: string
   mimeType: string
+  fileSize?: number
+  durationMs?: number
+  width?: number
+  height?: number
+  fps?: number
+  hasVideo?: boolean
+  hasAudio?: boolean
+  videoCodec?: string
+  audioCodec?: string
+  sampleRate?: number
+  channelCount?: number
+  videoCodecSupported?: boolean
+  audioCodecSupported?: boolean
+  /** Local derived JPEG. Not stored in the project document. */
+  thumbnail?: Blob
 }
 
 /** Persistent bytes for one media source. Not part of ProjectDocument. */
