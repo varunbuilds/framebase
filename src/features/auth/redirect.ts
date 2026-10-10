@@ -41,6 +41,7 @@ export function authRedirectLocation(value: string | null | undefined):
   return { to: '/projects' as const }
 }
 
+/** Callback stays on the origin that started sign-in. `next` is an in-app path. */
 export function googleCallbackUrl(origin: string, next?: string | null): string {
   const destination = safeAuthRedirect(next)
   const callback = new URL('/auth/callback', origin)

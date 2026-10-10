@@ -1,23 +1,30 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { AuthScreen } from '@/components/auth/AuthScreen'
-import { useAuth } from '@/features/auth/use-auth'
-import { authRedirectLocation, oauthCallbackMessage } from '@/features/auth/redirect'
+import { completeOAuthCallback } from '@/features/auth/oauth-callback'
+import { authRedirectLocation } from '@/features/auth/redirect'
+import { getSupabase } from '@/lib/supabase/client'
 
 export function AuthCallbackPage() {
-  const { error, error_description, redirect } = useSearch({
-    from: '/auth/callback',
-  })
-  const { status } = useAuth()
+  const { redirect } = useSearch({ from: '/auth/callback' })
   const navigate = useNavigate()
-  const failure = error ? oauthCallbackMessage(error, error_description) : null
-  const sessionReady = status === 'signed-in'
+  const [failure, setFailure] = useState<string | null>(null)
 
   useEffect(() => {
-    if (failure || !sessionReady) return
-
-    void navigate({ ...authRedirectLocation(redirect), replace: true })
-  }, [failure, navigate, redirect, sessionReady])
+    let cancelled = false
+    const auth = getSupabase().auth
+    void completeOAuthCallback(auth, window.location.href).then((result) => {
+      if (cancelled) return
+      if (!result.ok) {
+        setFailure(result.message)
+        return
+      }
+      void navigate({ ...authRedirectLocation(redirect), replace: true })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [navigate, redirect])
 
   return (
     <AuthScreen
@@ -28,9 +35,9 @@ export function AuthCallbackPage() {
         </Link>
       }
     >
-      {failure || (status !== 'loading' && !sessionReady) ? (
+      {failure ? (
         <p className="text-[13px] text-fb-danger" role="alert">
-          {failure ?? 'Google did not return a sign-in code. Try again.'}
+          {failure}
         </p>
       ) : (
         <p className="text-[13px] text-fb-muted">Completing Google sign-in…</p>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { googleCallbackUrl, oauthCallbackMessage, safeAuthRedirect, authRedirectLocation } from './redirect'
+import googleSource from './google.ts?raw'
 import { isShareToken, shareJoinPath } from '@/features/projects/share-access'
 
 const projectId = '22222222-2222-4222-8222-222222222222'
@@ -40,6 +41,25 @@ describe('google callback URL', () => {
     expect(googleCallbackUrl('https://framebase.test', `/editor/${projectId}`)).toBe(
       `https://framebase.test/auth/callback?redirect=%2Feditor%2F${projectId}`,
     )
+  })
+
+  it('builds the callback on the origin where sign-in started', () => {
+    const origins = [
+      'https://framebase.varunrewadi.com',
+      'https://framebase.varunbuilds.com',
+      'http://localhost:5173',
+    ]
+    for (const origin of origins) {
+      const callback = new URL(googleCallbackUrl(origin, `/editor/${projectId}`))
+      expect(callback.origin).toBe(origin)
+      expect(callback.pathname).toBe('/auth/callback')
+      expect(authRedirectLocation(callback.searchParams.get('redirect'))).toEqual({
+        to: '/editor/$projectId',
+        params: { projectId },
+      })
+      expect(googleCallbackUrl(origin)).toBe(`${origin}/auth/callback`)
+    }
+    expect(googleSource).toContain('googleCallbackUrl(window.location.origin, next)')
   })
 })
 
