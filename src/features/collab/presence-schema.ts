@@ -4,15 +4,15 @@ import type { ProjectDocument } from '@/types/timeline'
  * Ephemeral room presence. Liveblocks drops this when a user leaves.
  * It is never written into ProjectDocument, Storage, or Supabase.
  *
- * `cursor` uses the coordinate space the Liveblocks `Cursors` component
- * publishes: fractions of the timeline container, or null when the pointer
- * has left that surface.
+ * `cursor` is an absolute timeline position: time in milliseconds and
+ * content-space Y. It is not a fraction of anyone's visible viewport.
  */
 export type EditorActiveArea = 'timeline' | 'media' | 'preview' | 'inspector'
 
 export type EditorCursor = {
-  x: number
-  y: number
+  timeMs: number
+  contentY: number
+  trackId: string | null
 }
 
 export type EditorPresence = {
@@ -64,8 +64,9 @@ export function setCursor(
   cursor: EditorCursor | null,
 ): EditorPresence {
   if (
-    presence.cursor?.x === cursor?.x &&
-    presence.cursor?.y === cursor?.y &&
+    presence.cursor?.timeMs === cursor?.timeMs &&
+    presence.cursor?.contentY === cursor?.contentY &&
+    presence.cursor?.trackId === cursor?.trackId &&
     (presence.cursor == null) === (cursor == null)
   ) {
     return presence

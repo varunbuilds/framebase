@@ -74,10 +74,14 @@ describe('editor presence', () => {
   })
 
   it('records cursor presence and clears it when the pointer leaves', () => {
-    const moved = setCursor(EMPTY_EDITOR_PRESENCE, { x: 0.25, y: 0.5 })
+    const moved = setCursor(EMPTY_EDITOR_PRESENCE, {
+      timeMs: 250,
+      contentY: 80,
+      trackId: 'video',
+    })
     const gone = setCursor(moved, null)
 
-    expect(moved.cursor).toEqual({ x: 0.25, y: 0.5 })
+    expect(moved.cursor).toEqual({ timeMs: 250, contentY: 80, trackId: 'video' })
     expect(gone.cursor).toBeNull()
     expect(moved.selectedClipId).toBeNull()
   })
@@ -122,11 +126,14 @@ describe('editor presence', () => {
   it('does not copy presence into the project document when the active area changes', () => {
     const current = document()
     const snapshot = structuredClone(current)
-    const next = setActiveArea(setCursor(EMPTY_EDITOR_PRESENCE, { x: 0.1, y: 0.2 }), 'timeline')
+    const next = setActiveArea(
+      setCursor(EMPTY_EDITOR_PRESENCE, { timeMs: 100, contentY: 40, trackId: null }),
+      'timeline',
+    )
     const held = presenceLeavesDocument(current, next)
 
     expect(held.presence).toEqual({
-      cursor: { x: 0.1, y: 0.2 },
+      cursor: { timeMs: 100, contentY: 40, trackId: null },
       selectedClipId: null,
       activeArea: 'timeline',
     })

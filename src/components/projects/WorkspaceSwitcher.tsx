@@ -20,26 +20,35 @@ export function WorkspaceSwitcher({ disabled = false }: { disabled?: boolean }) 
   const menuId = useId()
   const label = workspace.folderName ?? 'No workspace'
 
+  const closeMenu = () => {
+    setVisible(false)
+    setOpen(false)
+  }
+
+  const openMenu = () => {
+    setPresent(true)
+    setOpen(true)
+  }
+
   useEffect(() => {
+    if (!present) return
     if (open) {
-      setPresent(true)
       const frame = requestAnimationFrame(() => {
         requestAnimationFrame(() => setVisible(true))
       })
       return () => cancelAnimationFrame(frame)
     }
-    setVisible(false)
     const timer = window.setTimeout(() => setPresent(false), 220)
     return () => window.clearTimeout(timer)
-  }, [open])
+  }, [open, present])
 
   useEffect(() => {
     if (!open) return
     const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+      if (!rootRef.current?.contains(event.target as Node)) closeMenu()
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+      if (event.key === 'Escape') closeMenu()
     }
     document.addEventListener('pointerdown', onPointerDown)
     document.addEventListener('keydown', onKeyDown)
@@ -55,7 +64,7 @@ export function WorkspaceSwitcher({ disabled = false }: { disabled?: boolean }) 
       await chooseWorkspace()
     } finally {
       setPending(false)
-      setOpen(false)
+      closeMenu()
     }
   }
 
@@ -77,7 +86,10 @@ export function WorkspaceSwitcher({ disabled = false }: { disabled?: boolean }) 
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          if (open) closeMenu()
+          else openMenu()
+        }}
         className="workspace-trigger h-full min-h-[36px]"
       >
         <Folder size={14} strokeWidth={1.7} className="shrink-0 text-[rgba(243,244,244,0.72)]" />

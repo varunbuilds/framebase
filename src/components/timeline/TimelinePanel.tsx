@@ -56,12 +56,12 @@ import {
 import type { Clip, Track } from '@/types/timeline'
 import { downloadVideoFrame } from '@/lib/media/save-frame'
 import { clamp, formatFrameClock, formatSignedFrameClock, FRAME_DURATION_MS, msToSeconds, snapToFrameMs, TIMELINE_FPS } from '@/utils/time'
-
-const TRACK_HEIGHT = 104
-const RULER_HEIGHT = 36
-const LABEL_WIDTH = 88
-/** Keeps the clip border/selection ring from clipping under the track titles. */
-const TIMELINE_X_INSET = 2
+import {
+  TIMELINE_LABEL_WIDTH as LABEL_WIDTH,
+  TIMELINE_RULER_HEIGHT as RULER_HEIGHT,
+  TIMELINE_TRACK_HEIGHT as TRACK_HEIGHT,
+  TIMELINE_X_INSET,
+} from '@/features/collab/timeline-cursor'
 const TIMELINE_MIN_HEIGHT = 220
 const TIMELINE_MAX_HEIGHT = 720
 /** Leave room for the toolbar + a usable preview region. */
