@@ -13,7 +13,7 @@ import { collabIndicator } from '@/features/collab/collab-session'
 import { useCollabSession } from '@/features/collab/collab-session-context'
 import { useEditorSession } from '@/features/editor/editor-session-context'
 import { useAuth } from '@/features/auth/use-auth'
-import { projectAccessRole } from '@/features/projects/share-access'
+import { shareControlForProject } from '@/features/editor/editor-pending-project'
 import {
   isProjectSaveShortcut,
   projectSaveShortcutLabel,
@@ -41,7 +41,7 @@ export function TopToolbar() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [shareOpen, setShareOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
-  const canShare = projectAccessRole(project.ownerId, user?.id) === 'owner'
+  const share = shareControlForProject(project, user?.id)
   const session = useEditorSession()
   const collab = useCollabSession()
 
@@ -255,7 +255,7 @@ export function TopToolbar() {
         >
           Save
         </button>
-        {canShare && (
+        {share.canShare && (
           <button
             type="button"
             onClick={() => setShareOpen(true)}
@@ -275,8 +275,8 @@ export function TopToolbar() {
           Export
         </button>
       </div>
-      {shareOpen && (
-        <ShareProjectDialog projectId={project.id} onClose={() => setShareOpen(false)} />
+      {shareOpen && share.projectId && (
+        <ShareProjectDialog projectId={share.projectId} onClose={() => setShareOpen(false)} />
       )}
       {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
     </header>

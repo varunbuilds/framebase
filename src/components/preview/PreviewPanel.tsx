@@ -6,6 +6,7 @@ import {
   resolvePlaybackAt,
 } from '@/features/editor/playback'
 import { playbackEnabled, previewFrameReady } from '@/features/editor/editor-session'
+import { previewAspectForSession } from '@/features/editor/editor-pending-project'
 import { useEditorSession } from '@/features/editor/editor-session-context'
 import { PreviewFrameSkeleton } from '@/components/layout/EditorSkeletons'
 import { useTimelinePlayback } from '@/features/editor/use-timeline-playback'
@@ -70,9 +71,11 @@ export function PreviewPanel() {
   const loaded = editorRoute.useLoaderData()
   const document = useEditorStore((state) => state.document)
   const playheadMs = useEditorStore((state) => state.ui.playheadMs)
-  const aspectRatio = session.structureReady
-    ? document.canvas.aspectRatio
-    : loaded.document.canvas.aspectRatio
+  const aspectRatio = previewAspectForSession({
+    structureReady: session.structureReady,
+    documentAspect: document.canvas.aspectRatio,
+    loaded,
+  })
   const [frameWidth, frameHeight] = aspectRatio.split(':').map(Number)
   const timelineDurationMs = getPlaybackEndMs(document)
   const isPlaying = useEditorStore((state) => state.ui.isPlaying)
