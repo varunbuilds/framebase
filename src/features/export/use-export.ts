@@ -9,9 +9,9 @@ import {
   type ExportQueueEvent,
   type ExportQueueItem,
 } from './export-queue'
-import { exportFilename, exportPhaseLabel, snapshotProject } from './export-plan'
+import { exportPhaseLabel, snapshotProject } from './export-plan'
 import { renderProjectExport } from './export-renderer'
-import { QUALITY_PRESETS, type ExportSettings } from './export-settings'
+import { exportDownloadName, QUALITY_PRESETS, type ExportSettings } from './export-settings'
 import { isExportCanceled } from './export-types'
 
 type StoredJob = {
@@ -115,13 +115,12 @@ export function useExport() {
     const snapshot = snapshotProject(useEditorStore.getState().document)
     const id = crypto.randomUUID()
     stored.current.set(id, { snapshot, settings })
-    const extension = settings.mode === 'audio' ? 'wav' : 'mp4'
     commit({
       type: 'enqueue',
       item: {
         id,
         label: `${settings.mode === 'audio' ? 'WAV' : 'MP4'} · ${QUALITY_PRESETS[settings.quality].label}`,
-        filename: exportFilename(snapshot.name, extension),
+        filename: exportDownloadName(settings, snapshot.name),
         status: 'queued',
         progress: null,
         message: null,
@@ -167,3 +166,5 @@ export function useExport() {
 
   return { items, running, label, enqueue, cancel, retry, download }
 }
+
+export type ExportController = ReturnType<typeof useExport>

@@ -18,7 +18,6 @@ import {
   emptyTimelineMessage,
   exportAudioSampleCount,
   exportDurationMs,
-  exportFilename,
   exportFrameCount,
   exportFrameWindow,
   mixIntoTimeline,
@@ -48,6 +47,7 @@ import {
 import { encodeWavPcm } from './export-wav'
 import {
   defaultExportSettings,
+  exportDownloadName,
   exportRangeDurationMs,
   QUALITY_PRESETS,
 } from './export-settings'
@@ -81,6 +81,7 @@ export async function renderProjectExport(
   const { snapshot, signal, onProgress } = request
   const loadMedia = request.loadMedia ?? loadExportMedia
   const settings = request.settings ?? defaultExportSettings(snapshot.canvas.aspectRatio, exportDurationMs(snapshot))
+  const filename = exportDownloadName(settings, snapshot.name)
   const durationMs = exportRangeDurationMs(settings)
   const range = { startMs: settings.rangeStartMs, endMs: settings.rangeEndMs }
   logExport('Starting export', {
@@ -200,7 +201,7 @@ export async function renderProjectExport(
       logExport('Export completed', { bytes: wavBytes.byteLength, mime: 'audio/wav' })
       return {
         blob: new Blob([wavBytes], { type: 'audio/wav' }),
-        filename: exportFilename(snapshot.name, 'wav'),
+        filename,
       }
     }
 
@@ -350,12 +351,12 @@ export async function renderProjectExport(
     logExport('Export completed', {
       bytes: buffer.byteLength,
       mime,
-      filename: exportFilename(snapshot.name, 'mp4'),
+      filename,
     })
     output = null
     return {
       blob: new Blob([buffer], { type: EXPORT_CONTAINER }),
-      filename: exportFilename(snapshot.name, 'mp4'),
+      filename,
     }
   } catch (error) {
     logExportError(error)

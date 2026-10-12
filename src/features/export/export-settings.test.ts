@@ -4,7 +4,10 @@ import {
   QUALITY_PRESETS,
   defaultExportSettings,
   estimateOutputBytes,
+  exportDownloadName,
+  formatExportClock,
   inspectExportReadiness,
+  parseExportTime,
   preflightExport,
   resolutionChoices,
 } from './export-settings'
@@ -21,6 +24,19 @@ describe('export settings', () => {
     expect(QUALITY_PRESETS.recommended.videoBitrate).toBe(8_000_000)
     expect(QUALITY_PRESETS.small.videoBitrate).toBeLessThan(QUALITY_PRESETS.maximum.videoBitrate)
     expect(QUALITY_PRESETS.recommended.audioBitrate).toBe(192_000)
+  })
+
+  it('reads a typed range and keeps the chosen file name', () => {
+    expect(parseExportTime('1.5')).toBe(1_500)
+    expect(parseExportTime('1:05.0')).toBe(65_000)
+    expect(parseExportTime('1:02:03')).toBe(3_723_000)
+    expect(parseExportTime('1:')).toBeNull()
+    expect(formatExportClock(1_500)).toBe('0:01.5')
+    const settings = defaultExportSettings('16:9', 1_000)
+    expect(exportDownloadName({ ...settings, fileBaseName: 'My Cut' }, 'Project')).toBe('My Cut.mp4')
+    expect(exportDownloadName({ ...settings, mode: 'audio', fileBaseName: '  ' }, 'Project')).toBe(
+      'Project.wav',
+    )
   })
 
   it('offers the project size and lower even sizes only', () => {

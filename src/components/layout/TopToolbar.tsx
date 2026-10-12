@@ -9,6 +9,7 @@ import { ShareProjectDialog } from '@/components/projects/ShareProjectDialog'
 import { ToolbarNameSkeleton } from '@/components/layout/EditorSkeletons'
 import { CollaboratorAvatars } from '@/features/collab/CollaboratorAvatars'
 import { ExportDialog } from '@/features/export/ExportDialog'
+import { useExport } from '@/features/export/use-export'
 import { collabIndicator } from '@/features/collab/collab-session'
 import { useCollabSession } from '@/features/collab/collab-session-context'
 import { useEditorSession } from '@/features/editor/editor-session-context'
@@ -41,6 +42,7 @@ export function TopToolbar() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [shareOpen, setShareOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const exportQueue = useExport()
   const share = shareControlForProject(project, user?.id)
   const session = useEditorSession()
   const collab = useCollabSession()
@@ -272,13 +274,15 @@ export function TopToolbar() {
           className="inline-flex h-7 items-center gap-1.5 rounded-md border border-fb-border bg-white/[0.06] px-2.5 text-[12px] font-medium text-fb-text hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Download size={13} strokeWidth={1.75} />
-          Export
+          {exportQueue.running ? 'Exporting…' : 'Export'}
         </button>
       </div>
       {shareOpen && share.projectId && (
         <ShareProjectDialog projectId={share.projectId} onClose={() => setShareOpen(false)} />
       )}
-      {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
+      {exportOpen && (
+        <ExportDialog onClose={() => setExportOpen(false)} queue={exportQueue} />
+      )}
     </header>
   )
 }

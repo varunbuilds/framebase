@@ -1,6 +1,6 @@
 import type { CanvasAspectRatio, ProjectDocument } from '@/types/timeline'
 import type { Mp4EncodeProbe } from './export-capabilities'
-import { requiredMediaSources } from './export-plan'
+import { exportFilename, requiredMediaSources } from './export-plan'
 import { EXPORT_SAMPLE_RATE, EXPORT_SIZES } from './export-types'
 
 export const QUALITY_PRESETS = {
@@ -24,6 +24,48 @@ export type ExportSettings = {
   frameRate: ExportFrameRate
   rangeStartMs: number
   rangeEndMs: number
+  /** Name without an extension. Empty uses the project name. */
+  fileBaseName?: string
+}
+
+export function qualityRates(quality: ExportQuality): { video: string; audio: string } {
+  const preset = QUALITY_PRESETS[quality]
+  return {
+    video: `${preset.videoBitrate / 1_000_000} Mbps`,
+    audio: `${preset.audioBitrate / 1_000} kbps`,
+  }
+}
+
+export function exportDownloadName(
+  settings: Pick<ExportSettings, 'mode' | 'fileBaseName'>,
+  projectName: string,
+): string {
+  const extension = settings.mode === 'audio' ? 'wav' : 'mp4'
+  const base = settings.fileBaseName?.trim()
+  return exportFilename(base || projectName, extension)
+}
+
+/** Seconds, or minutes:seconds, with an optional decimal. */
+export function parseExportTime(value: string): number | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (/^\d+(\.\d+)?$/.test(trimmed)) return Math.round(Number(trimmed) * 1000)
+  const parts = trimmed.split(':')
+  if (parts.length !== 2 && parts.length !== 3) return null
+  if (!parts.every((part) => /^\d+(\.\d+)?$/.test(part))) return null
+  const numbers = parts.map(Number)
+  if (numbers.some((part) => !Number.isFinite(part))) return null
+  const [first, second, third] = numbers
+  const seconds =
+    parts.length === 3 ? (first ?? 0) * 3600 + (second ?? 0) * 60 + (third ?? 0) : (first ?? 0) * 60 + (second ?? 0)
+  return Math.round(seconds * 1000)
+}
+
+export function formatExportClock(ms: number): string {
+  const total = Math.max(0, ms) / 1000
+  const minutes = Math.floor(total / 60)
+  const seconds = total - minutes * 60
+  return `${minutes}:${seconds.toFixed(1).padStart(4, '0')}`
 }
 
 /** Containers and codecs this renderer does not write. Shown disabled, never selected. */
