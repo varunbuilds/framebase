@@ -9,32 +9,24 @@ export const EXPORT_AUDIO_BITRATE = 192_000
  * Mediabunny 1.59 rejects an encoding config that sets both `quality` and
  * `bitrate`. Bitrate lives inside Quality.
  */
-export function videoExportQuality(): Quality {
-  return new Quality({ bitrate: EXPORT_VIDEO_BITRATE, bitrateMode: 'variable' })
-}
-
-export function audioExportQuality(): Quality {
-  return new Quality({ bitrate: EXPORT_AUDIO_BITRATE, bitrateMode: 'variable' })
-}
-
-export function videoExportEncoding() {
+export function videoExportEncoding(videoBitrate = EXPORT_VIDEO_BITRATE) {
   return {
     codec: 'avc' as const,
     keyFrameInterval: 2,
-    quality: videoExportQuality(),
+    quality: new Quality({ bitrate: videoBitrate, bitrateMode: 'variable' as const }),
   }
 }
 
-export function audioExportEncoding() {
+export function audioExportEncoding(audioBitrate = EXPORT_AUDIO_BITRATE) {
   return {
     codec: 'aac' as const,
-    quality: audioExportQuality(),
+    quality: new Quality({ bitrate: audioBitrate, bitrateMode: 'variable' as const }),
   }
 }
 
 export type Mp4EncodeProbe = {
   webCodecs: boolean
-  canEncodeAvc: (width: number, height: number) => Promise<boolean>
+  canEncodeAvc: (width: number, height: number, frameRate?: number) => Promise<boolean>
   canEncodeAac: () => Promise<boolean>
 }
 
@@ -53,24 +45,29 @@ export function webCodecsAvailability(): Record<string, string> {
   }
 }
 
-export function browserMp4Probe(): Mp4EncodeProbe {
+export function browserMp4Probe(options?: {
+  videoBitrate?: number
+  audioBitrate?: number
+}): Mp4EncodeProbe {
+  const videoBitrate = options?.videoBitrate ?? EXPORT_VIDEO_BITRATE
+  const audioBitrate = options?.audioBitrate ?? EXPORT_AUDIO_BITRATE
   return {
     webCodecs:
       typeof VideoEncoder !== 'undefined' &&
       typeof AudioEncoder !== 'undefined' &&
       typeof VideoFrame !== 'undefined',
-    canEncodeAvc: (width, height) =>
+    canEncodeAvc: (width, height, frameRate = 30) =>
       canEncodeVideo('avc', {
         width,
         height,
-        frameRate: 30,
-        quality: videoExportQuality(),
+        frameRate,
+        quality: new Quality({ bitrate: videoBitrate, bitrateMode: 'variable' }),
       }),
     canEncodeAac: () =>
       canEncodeAudio('aac', {
         numberOfChannels: 2,
         sampleRate: 48_000,
-        quality: audioExportQuality(),
+        quality: new Quality({ bitrate: audioBitrate, bitrateMode: 'variable' }),
       }),
   }
 }
@@ -83,6 +80,7 @@ export async function mp4ExportBlocker(
   probe: Mp4EncodeProbe,
   size: Pick<ExportSize, 'width' | 'height'>,
   audioRequired: boolean,
+  frameRate = 30,
 ): Promise<string | null> {
   logExport('Capability check', {
     ...webCodecsAvailability(),
@@ -95,7 +93,7 @@ export async function mp4ExportBlocker(
 
   let videoSupported: boolean
   try {
-    videoSupported = await probe.canEncodeAvc(size.width, size.height)
+    videoSupported = await probe.canEncodeAvc(size.width, size.height, frameRate)
   } catch (error) {
     logExportError(error)
     const report = reportExportError(error)

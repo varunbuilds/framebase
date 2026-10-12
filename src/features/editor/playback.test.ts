@@ -630,25 +630,35 @@ describe('resolveActiveVideoClip', () => {
     expect(resolvePlaybackAt(doc, 1000).status).toBe('gap')
   })
 
-  it('still shows a muted or locked video clip', () => {
-    const mutedLocked = track({
+  it('skips a disabled video track and still shows a locked one', () => {
+    const locked = track({
       id: 'v-front',
       name: 'Video 2',
       kind: 'video',
       order: -1,
     })
-    mutedLocked.muted = true
-    mutedLocked.locked = true
-    const doc = project({
-      tracks: [mutedLocked, lower],
+    locked.locked = true
+    const lockedDoc = project({
+      tracks: [locked, lower],
       clips: [
         videoClip('front', 'v-front', 'm-upper', 0, 5000),
         videoClip('under', 'v1', 'm-lower', 0, 5000),
       ],
       mediaSources: [upperSource, lowerSource],
     })
+    expect(resolveActiveVideoClip(lockedDoc, 1000)?.clip.id).toBe('front')
 
-    expect(resolveActiveVideoClip(doc, 1000)?.clip.id).toBe('front')
+    const disabled = { ...locked, muted: true }
+    const disabledDoc = project({
+      tracks: [disabled, lower],
+      clips: lockedDoc.clips,
+      mediaSources: [upperSource, lowerSource],
+    })
+    expect(resolveActiveVideoClip(disabledDoc, 1000)?.clip.id).toBe('under')
+    expect(resolvePlaybackAt(disabledDoc, 1000)).toMatchObject({
+      status: 'clip',
+      clip: expect.objectContaining({ id: 'under' }),
+    })
   })
 })
 
@@ -1045,6 +1055,18 @@ describe('audio timeline resolution', () => {
     expect(collectTimelineAudio(separated).audibleAudioClips.map((item) => item.clip.id)).toEqual([
       'song',
     ])
+  })
+
+  it('silences embedded video audio when that video track is muted', () => {
+    const muted = {
+      ...separated,
+      tracks: separated.tracks.map((item) =>
+        item.id === 'v1' || item.id === 'v-top' ? { ...item, muted: true } : item,
+      ),
+    }
+    expect(collectTimelineAudio(muted).embeddedVideoClips).toEqual([])
+    expect(videoSourceUsesEmbeddedAudio(muted, 'video')).toBe(false)
+    expect(resolvePlaybackAt(muted, 0).status).toBe('gap')
   })
 
   it('leaves a warmed element on the clip in-point instead of jumping to the playhead', () => {

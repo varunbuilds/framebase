@@ -442,6 +442,40 @@ export function deleteClips(
   return applyOperation(document, { type: 'clips.delete', clipIds })
 }
 
+/** Inserts a video lane above the current video tracks, or an audio lane below. */
+export function addTimelineTrack(
+  document: ProjectDocument,
+  kind: Track['kind'],
+): OperationResult {
+  const { track } = createProvisionalTrack(document.tracks, kind)
+  return applyOperation(document, { type: 'track.add', track })
+}
+
+export function updateTrack(
+  document: ProjectDocument,
+  trackId: string,
+  patch: { muted?: boolean; locked?: boolean },
+): OperationResult {
+  return applyOperation(document, { type: 'track.update', trackId, ...patch })
+}
+
+/** Removes the lane and the clips on it in one undo step. Linked clips elsewhere stay. */
+export function removeTimelineTrack(
+  document: ProjectDocument,
+  trackId: string,
+): OperationResult {
+  if (!getTrackById(document, trackId)) {
+    return { ok: false, error: 'Track not found.' }
+  }
+  const clipIds = document.clips
+    .filter((clip) => clip.trackId === trackId)
+    .map((clip) => clip.id)
+  const operations: EditorOperation[] = []
+  if (clipIds.length > 0) operations.push({ type: 'clips.delete', clipIds })
+  operations.push({ type: 'track.remove', trackId })
+  return applyOperations(document, operations)
+}
+
 export function createTrack(args: {
   document: ProjectDocument
   kind: Track['kind']

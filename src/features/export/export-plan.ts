@@ -49,24 +49,27 @@ export function exportDurationMs(document: ProjectDocument): number {
   return getPlaybackEndMs(document)
 }
 
-export function exportFrameCount(durationMs: number): number {
-  if (durationMs <= 0) return 0
-  return Math.ceil((durationMs / 1000) * EXPORT_FPS - 1e-9)
+export function exportFrameCount(durationMs: number, frameRate = EXPORT_FPS): number {
+  if (durationMs <= 0 || frameRate <= 0) return 0
+  return Math.ceil((durationMs / 1000) * frameRate - 1e-9)
 }
 
 export function exportFrameWindow(
   index: number,
   frameCount: number,
   durationMs: number,
+  frameRate = EXPORT_FPS,
 ): { timelineMs: number; timestampSec: number; durationSec: number } {
   const durationSec = durationMs / 1000
-  const timestampSec = index / EXPORT_FPS
+  const timestampSec = index / frameRate
   const nextSec =
-    index === frameCount - 1 ? durationSec : Math.min(durationSec, (index + 1) / EXPORT_FPS)
+    index === frameCount - 1 ? durationSec : Math.min(durationSec, (index + 1) / frameRate)
   return {
     timelineMs: Math.round(timestampSec * 1000),
     timestampSec,
-    durationSec: Math.max(nextSec - timestampSec, 1 / (EXPORT_FPS * 10)),
+    // The last frame ends on the requested duration. A minimum duration would
+    // push that frame past the audio mix whenever the remainder is very short.
+    durationSec: Math.max(0, nextSec - timestampSec),
   }
 }
 
@@ -92,24 +95,37 @@ export function pictureAt(
  * unmuted audio-track clips, plus a video file's audio only when no
  * audio-track clip owns that source.
  */
-export function audioSpansForExport(document: ProjectDocument): ExportAudioSpan[] {
-  const endMs = exportDurationMs(document)
+export function audioSpansForExport(
+  document: ProjectDocument,
+  range?: { startMs: number; endMs: number },
+): ExportAudioSpan[] {
+  const projectEnd = exportDurationMs(document)
+  const startMs = range?.startMs ?? 0
+  const endMs = range?.endMs ?? projectEnd
   const { audibleAudioClips, embeddedVideoClips } = collectTimelineAudio(document)
   const spans: ExportAudioSpan[] = []
   for (const { clip, source } of [...audibleAudioClips, ...embeddedVideoClips]) {
-    const span = spanForClip(clip, source, endMs)
+    const span = spanForClip(clip, source, startMs, endMs)
     if (span) spans.push(span)
   }
   return spans
 }
 
-export function requiredMediaSources(document: ProjectDocument): MediaSource[] {
+export function requiredMediaSources(
+  document: ProjectDocument,
+  range?: { startMs: number; endMs: number },
+): MediaSource[] {
   const ids = new Set<string>()
+  const startMs = range?.startMs ?? 0
+  const endMs = range?.endMs ?? exportDurationMs(document)
   for (const clip of document.clips) {
     const track = getTrackById(document, clip.trackId)
-    if (track?.kind === 'video') ids.add(clip.mediaSourceId)
+    if (track?.kind !== 'video' || track.muted) continue
+    const clipEnd = clip.timelineStartMs + Math.max(0, clip.sourceOutMs - clip.sourceInMs)
+    if (clipEnd <= startMs || clip.timelineStartMs >= endMs) continue
+    ids.add(clip.mediaSourceId)
   }
-  for (const span of audioSpansForExport(document)) ids.add(span.mediaSourceId)
+  for (const span of audioSpansForExport(document, range)) ids.add(span.mediaSourceId)
 
   const sources: MediaSource[] = []
   for (const id of ids) {
@@ -139,14 +155,14 @@ export function emptyTimelineMessage(): string {
   return "Export can't start because the timeline is empty."
 }
 
-export function exportFilename(projectName: string): string {
+export function exportFilename(projectName: string, extension = 'mp4'): string {
   const cleaned = [...projectName]
     .map((character) => (isUnsafeFilenameCharacter(character) ? ' ' : character))
     .join('')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/[. ]+$/g, '')
-  return `${cleaned || 'Untitled'}.mp4`
+  return `${cleaned || 'Untitled'}.${extension.replace(/^\./, '')}`
 }
 
 function isUnsafeFilenameCharacter(character: string): boolean {
@@ -199,44 +215,84 @@ export function timelineSampleOffset(timelineMs: number, sampleRate = EXPORT_SAM
   return Math.round((timelineMs / 1000) * sampleRate)
 }
 
-/** Add source samples into a mix, resampling when the rates differ. */
+/**
+ * Where a decoded packet belongs in the mix.
+ * Packet timestamps are fractional seconds. Rounding each packet to a whole
+ * millisecond shifts a 1024-frame block by tens of samples, so the next
+ * packet overlaps the previous one and the sum bursts.
+ */
+/** Unrounded timeline time of one decoded packet, in seconds. */
+export function audioMixTimelineSec(args: {
+  timelineStartMs: number
+  sourceInMs: number
+  sampleTimestampSec: number
+}): number {
+  return args.timelineStartMs / 1000 + (args.sampleTimestampSec - args.sourceInMs / 1000)
+}
+
+export function audioMixSampleOffset(args: {
+  timelineStartMs: number
+  sourceInMs: number
+  sampleTimestampSec: number
+  sampleRate: number
+}): number {
+  return Math.round(audioMixTimelineSec(args) * args.sampleRate)
+}
+
+export function exportAudioSampleCount(
+  durationMs: number,
+  sampleRate = EXPORT_SAMPLE_RATE,
+): number {
+  if (durationMs <= 0 || sampleRate <= 0) return 0
+  return Math.round((durationMs / 1000) * sampleRate)
+}
+
+/**
+ * Add one decoded packet into the mix.
+ * `timelineStartSec` is the packet's real timeline time, before rounding.
+ * Each packet occupies [round(start), round(start + duration)), so the next
+ * packet begins where this one ended even when the source rate is not 48 kHz.
+ */
 export function mixIntoTimeline(args: {
   destination: Float32Array
   source: Float32Array
   sourceRate: number
   destinationRate: number
-  destinationOffset: number
+  destinationOffset?: number
+  timelineStartSec?: number
 }): void {
-  const { destination, source, sourceRate, destinationRate, destinationOffset } = args
+  const { destination, source, sourceRate, destinationRate } = args
   if (source.length === 0 || sourceRate <= 0 || destinationRate <= 0) return
+  const timelineStartSec =
+    args.timelineStartSec ?? (args.destinationOffset ?? 0) / destinationRate
+  const start = Math.round(timelineStartSec * destinationRate)
+  const end = Math.round((timelineStartSec + source.length / sourceRate) * destinationRate)
+  const first = Math.max(0, start)
+  const last = Math.min(destination.length, end)
 
-  if (sourceRate === destinationRate) {
-    const start = Math.max(0, destinationOffset)
-    const end = Math.min(destination.length, destinationOffset + source.length)
-    for (let index = start; index < end; index += 1) {
-      destination[index] = (destination[index] ?? 0) + (source[index - destinationOffset] ?? 0)
-    }
-    return
-  }
-
-  const destFrames = Math.max(1, Math.round((source.length * destinationRate) / sourceRate))
-  for (let index = 0; index < destFrames; index += 1) {
-    const destIndex = destinationOffset + index
-    if (destIndex < 0 || destIndex >= destination.length) continue
-    const position = (index * sourceRate) / destinationRate
+  for (let destIndex = first; destIndex < last; destIndex += 1) {
+    const raw = (destIndex / destinationRate - timelineStartSec) * sourceRate
+    // Rounding the packet onto the destination grid can place one sample
+    // just outside the source. Read the nearest source sample instead of
+    // leaving that destination sample silent.
+    const position = Math.min(source.length - 1, Math.max(0, raw))
     const left = Math.floor(position)
     const right = Math.min(source.length - 1, left + 1)
     const weight = position - left
-    const sample =
-      (source[left] ?? 0) * (1 - weight) + (source[right] ?? 0) * weight
+    const sample = (source[left] ?? 0) * (1 - weight) + (source[right] ?? 0) * weight
     destination[destIndex] = (destination[destIndex] ?? 0) + sample
   }
 }
 
+/**
+ * Brings samples outside full scale back to ±1. Samples already inside
+ * [-1, 1] are left alone, including ones near full scale.
+ */
 export function clampPcm(samples: Float32Array): void {
   for (let index = 0; index < samples.length; index += 1) {
     const value = samples[index] ?? 0
-    samples[index] = value < -1 ? -1 : value > 1 ? 1 : value
+    if (value > 1) samples[index] = 1
+    else if (value < -1) samples[index] = -1
   }
 }
 
@@ -283,17 +339,20 @@ function percentOf(state: ExportJob): number {
 function spanForClip(
   clip: Clip,
   source: MediaSource,
-  endMs: number,
+  rangeStartMs: number,
+  rangeEndMs: number,
 ): ExportAudioSpan | null {
-  const durationMs = Math.max(0, clip.sourceOutMs - clip.sourceInMs)
-  const visibleMs = Math.min(durationMs, Math.max(0, endMs - clip.timelineStartMs))
-  if (visibleMs <= 0 || clip.timelineStartMs >= endMs) return null
+  const clipEndMs = clip.timelineStartMs + Math.max(0, clip.sourceOutMs - clip.sourceInMs)
+  const startMs = Math.max(clip.timelineStartMs, rangeStartMs)
+  const endMs = Math.min(clipEndMs, rangeEndMs)
+  if (endMs <= startMs) return null
+  const intoClipMs = startMs - clip.timelineStartMs
   return {
     mediaSourceId: source.id,
     mediaName: source.name,
-    timelineStartMs: clip.timelineStartMs,
-    sourceInMs: clip.sourceInMs,
-    sourceOutMs: clip.sourceInMs + visibleMs,
+    timelineStartMs: startMs - rangeStartMs,
+    sourceInMs: clip.sourceInMs + intoClipMs,
+    sourceOutMs: clip.sourceInMs + intoClipMs + (endMs - startMs),
   }
 }
 

@@ -9,9 +9,12 @@ import {
 } from './export-capabilities'
 import { reportExportError } from './export-log'
 import {
+  audioMixSampleOffset,
+  audioMixTimelineSec,
   audioSpansForExport,
   clampPcm,
   emptyTimelineMessage,
+  exportAudioSampleCount,
   exportDurationMs,
   exportFilename,
   exportFrameCount,
@@ -470,6 +473,76 @@ describe('audio placement', () => {
     expect(destination.at(-1)).toBeCloseTo(0.8)
     expect(later).toBe(100)
   })
+
+  it('places consecutive decoder packets on contiguous samples', () => {
+    const frames = 1024
+    const rate = 48_000
+    const packetSec = frames / rate
+    const first = audioMixSampleOffset({
+      timelineStartMs: 0,
+      sourceInMs: 0,
+      sampleTimestampSec: 0,
+      sampleRate: rate,
+    })
+    const second = audioMixSampleOffset({
+      timelineStartMs: 0,
+      sourceInMs: 0,
+      sampleTimestampSec: packetSec,
+      sampleRate: rate,
+    })
+    expect(second).toBe(first + frames)
+
+    const roundedMs = placedAudioTimelineMs({
+      timelineStartMs: 0,
+      sourceInMs: 0,
+      sampleTimestampSec: packetSec,
+    })
+    expect(timelineSampleOffset(roundedMs, rate)).not.toBe(frames)
+
+    const destination = new Float32Array(frames * 2)
+    const packet = new Float32Array(frames).fill(0.25)
+    mixIntoTimeline({
+      destination,
+      source: packet,
+      sourceRate: rate,
+      destinationRate: rate,
+      destinationOffset: first,
+    })
+    mixIntoTimeline({
+      destination,
+      source: packet,
+      sourceRate: rate,
+      destinationRate: rate,
+      destinationOffset: second,
+    })
+    expect(destination[frames - 1]).toBeCloseTo(0.25)
+    expect(destination[frames]).toBeCloseTo(0.25)
+    expect(Math.max(...destination)).toBeCloseTo(0.25)
+  })
+
+  it('keeps the audio mix the same length as the video range', () => {
+    const durationMs = 1_500
+    const frames = exportFrameCount(durationMs)
+    let endSec = 0
+    for (let index = 0; index < frames; index += 1) {
+      const window = exportFrameWindow(index, frames, durationMs)
+      endSec = window.timestampSec + window.durationSec
+    }
+    expect(endSec).toBeCloseTo(durationMs / 1000)
+    expect(exportAudioSampleCount(durationMs) / 48_000).toBeCloseTo(durationMs / 1000, 5)
+  })
+
+  it('ends the last video frame on the requested duration', () => {
+    const durationMs = 1_001
+    const frameRate = 30
+    const frames = exportFrameCount(durationMs, frameRate)
+    const first = exportFrameWindow(0, frames, durationMs, frameRate)
+    const last = exportFrameWindow(frames - 1, frames, durationMs, frameRate)
+    expect(first.timestampSec).toBe(0)
+    expect(last.timestampSec + last.durationSec).toBeCloseTo(durationMs / 1000, 6)
+    const audioSec = exportAudioSampleCount(durationMs) / 48_000
+    expect(Math.abs(audioSec - (last.timestampSec + last.durationSec))).toBeLessThan(1 / 48_000)
+  })
 })
 
 describe('pcm mix', () => {
@@ -489,11 +562,104 @@ describe('pcm mix', () => {
       destinationRate: 48_000,
       destinationOffset: 1,
     })
-    expect(Array.from(destination)).toEqual([0, 1.25, 1.25, 0])
+    expect(Array.from(destination.slice(0, 2))).toEqual([0, 1.25])
+    const before = Float32Array.from(destination)
     clampPcm(destination)
     expect(Array.from(destination)).toEqual([0, 1, 1, 0])
+    expect(maxAdjacentDelta(destination)).toBe(1)
+    expect(before[1]).toBe(1.25)
+  })
+
+  it('leaves samples inside full scale unchanged', () => {
+    const legal = new Float32Array([0, 0.25, 0.89, 0.95, 1, -0.95, -1])
+    const copy = Float32Array.from(legal)
+    clampPcm(legal)
+    expect(Array.from(legal)).toEqual(Array.from(copy))
+    expect(maxAdjacentDelta(legal)).toBe(maxAdjacentDelta(copy))
+  })
+
+  it('limits an overlap without changing the samples beside it', () => {
+    const destination = new Float32Array(4)
+    mixIntoTimeline({
+      destination,
+      source: new Float32Array([0.8, 0.8, 0.2]),
+      sourceRate: 48_000,
+      destinationRate: 48_000,
+      destinationOffset: 0,
+    })
+    mixIntoTimeline({
+      destination,
+      source: new Float32Array([0.8, 0.8]),
+      sourceRate: 48_000,
+      destinationRate: 48_000,
+      destinationOffset: 0,
+    })
+    expect(destination[0]).toBeCloseTo(1.6)
+    expect(destination[2]).toBeCloseTo(0.2)
+    clampPcm(destination)
+    expect(destination[0]).toBe(1)
+    expect(destination[1]).toBe(1)
+    expect(destination[2]).toBeCloseTo(0.2)
+    expect(destination[3]).toBe(0)
+  })
+
+  it('tiles packets from a source rate other than 48 kHz', () => {
+    const sourceRate = 44_100
+    const destinationRate = 48_000
+    const frames = 1024
+    const packets = 5
+    const timelineSec = (packets * frames) / sourceRate
+    const end = Math.round(timelineSec * destinationRate)
+    const destination = new Float32Array(end)
+    for (let packet = 0; packet < packets; packet += 1) {
+      const timelineStartSec = audioMixTimelineSec({
+        timelineStartMs: 0,
+        sourceInMs: 0,
+        sampleTimestampSec: (packet * frames) / sourceRate,
+      })
+      mixIntoTimeline({
+        destination,
+        source: new Float32Array(frames).fill(1),
+        sourceRate,
+        destinationRate,
+        timelineStartSec,
+      })
+    }
+    expect(destination[0]).toBeCloseTo(1)
+    expect(destination[end - 1]).toBeCloseTo(1)
+    expect(Math.max(...destination)).toBeLessThanOrEqual(1)
+    expect(Math.min(...destination)).toBeGreaterThan(0)
+  })
+
+  it('places a trimmed packet after a leading gap', () => {
+    const timelineStartSec = audioMixTimelineSec({
+      timelineStartMs: 1_000,
+      sourceInMs: 500,
+      sampleTimestampSec: 0.5,
+    })
+    expect(timelineStartSec).toBeCloseTo(1)
+    const destination = new Float32Array(48_000 + 4)
+    mixIntoTimeline({
+      destination,
+      source: new Float32Array([0.3, 0.3]),
+      sourceRate: 48_000,
+      destinationRate: 48_000,
+      timelineStartSec,
+    })
+    expect(destination[47_999]).toBe(0)
+    expect(destination[48_000]).toBeCloseTo(0.3)
+    expect(destination[48_001]).toBeCloseTo(0.3)
+    expect(maxAdjacentDelta(destination)).toBeCloseTo(0.3)
   })
 })
+
+function maxAdjacentDelta(samples: Float32Array): number {
+  let max = 0
+  for (let index = 1; index < samples.length; index += 1) {
+    max = Math.max(max, Math.abs((samples[index] ?? 0) - (samples[index - 1] ?? 0)))
+  }
+  return max
+}
 
 describe('mp4 capability', () => {
   const size = { width: 1920, height: 1080 }

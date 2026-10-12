@@ -4,15 +4,18 @@ import { temporal } from 'zundo'
 import {
   addMediaSource,
   addMediaToTimeline,
+  addTimelineTrack,
   deleteClips,
   linkClips,
   moveClipOnTimeline,
   removeMediaSource,
+  removeTimelineTrack,
   renameProject,
   trimClip,
   unlinkClips,
   splitClipsAtTime,
   updateClipLabel,
+  updateTrack,
 } from '@/features/editor/operations'
 import { getPlaybackEndMs } from '@/features/editor/playback'
 import {
@@ -28,7 +31,7 @@ import { revokeAllObjectUrls, revokeObjectUrl } from '@/lib/media/object-urls'
 import { clearRuntimeDerivedCaches } from '@/lib/media/runtime-caches'
 import { clearWaveformPeaks } from '@/lib/media/waveform'
 import type { ClipDragState, EditorUiState } from '@/types/editor'
-import type { MediaSource, ProjectDocument, RemoteMediaReference, TimeMs } from '@/types/timeline'
+import type { MediaSource, ProjectDocument, RemoteMediaReference, TimeMs, Track } from '@/types/timeline'
 
 function documentUsesOpfsKey(document: ProjectDocument, key: string): boolean {
   return document.mediaSources.some(
@@ -91,6 +94,10 @@ interface EditorActions {
   unlinkSelectedClips: () => boolean
   splitClipsAt: (clipIds: string[], timelineCutMs: TimeMs) => boolean
   updateSelectedClipLabel: (label: string) => boolean
+  addTrack: (kind: Track['kind']) => boolean
+  setTrackMuted: (trackId: string, muted: boolean) => boolean
+  setTrackLocked: (trackId: string, locked: boolean) => boolean
+  removeTrack: (trackId: string) => boolean
 }
 
 export type EditorStore = {
@@ -618,6 +625,54 @@ const editorStoreCreator: StateCreator<EditorStore> = (set, get) => ({
     set({
       document: commitDocument(get().document, result.document),
       ui: { ...get().ui, saveStatus: 'unsaved' },
+    })
+    return true
+  },
+
+  addTrack: (kind) => {
+    const result = addTimelineTrack(get().document, kind)
+    if (!result.ok) return false
+    set({
+      document: commitDocument(get().document, result.document),
+      ui: { ...get().ui, saveStatus: 'unsaved' },
+    })
+    return true
+  },
+
+  setTrackMuted: (trackId, muted) => {
+    const result = updateTrack(get().document, trackId, { muted })
+    if (!result.ok) return false
+    set({
+      document: commitDocument(get().document, result.document),
+      ui: { ...get().ui, saveStatus: 'unsaved' },
+    })
+    return true
+  },
+
+  setTrackLocked: (trackId, locked) => {
+    const result = updateTrack(get().document, trackId, { locked })
+    if (!result.ok) return false
+    set({
+      document: commitDocument(get().document, result.document),
+      ui: { ...get().ui, saveStatus: 'unsaved' },
+    })
+    return true
+  },
+
+  removeTrack: (trackId) => {
+    const result = removeTimelineTrack(get().document, trackId)
+    if (!result.ok) return false
+    const ui = get().ui
+    set({
+      document: commitDocument(get().document, result.document),
+      ui: {
+        ...ui,
+        selectedClipIds: ui.selectedClipIds.filter((id) =>
+          result.document.clips.some((clip) => clip.id === id),
+        ),
+        isPlaying: false,
+        saveStatus: 'unsaved',
+      },
     })
     return true
   },

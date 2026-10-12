@@ -93,8 +93,11 @@ export type ExportEvent =
   | { type: 'cancel' }
   | { type: 'reset' }
 
+import type { ExportSettings } from './export-settings'
+
 export type ExportRequest = {
   snapshot: ProjectDocument
+  settings?: ExportSettings
   signal: AbortSignal
   onProgress: (progress: ExportProgress) => void
 }

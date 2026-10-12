@@ -13,18 +13,17 @@ import {
 } from 'mediabunny'
 import {
   audioSpansForExport,
+  audioMixTimelineSec,
   clampPcm,
   emptyTimelineMessage,
+  exportAudioSampleCount,
   exportDurationMs,
   exportFilename,
   exportFrameCount,
   exportFrameWindow,
-  exportSizeFor,
   mixIntoTimeline,
-  placedAudioTimelineMs,
   pictureAt,
   requiredMediaSources,
-  timelineSampleOffset,
   unavailableMediaMessage,
 } from './export-plan'
 import {
@@ -46,6 +45,12 @@ import {
   type ExportAudioSpan,
   type ExportRequest,
 } from './export-types'
+import { encodeWavPcm } from './export-wav'
+import {
+  defaultExportSettings,
+  exportRangeDurationMs,
+  QUALITY_PRESETS,
+} from './export-settings'
 
 type OpenedMedia = {
   input: Input
@@ -75,15 +80,20 @@ export async function renderProjectExport(
 ): Promise<{ blob: Blob; filename: string }> {
   const { snapshot, signal, onProgress } = request
   const loadMedia = request.loadMedia ?? loadExportMedia
+  const settings = request.settings ?? defaultExportSettings(snapshot.canvas.aspectRatio, exportDurationMs(snapshot))
+  const durationMs = exportRangeDurationMs(settings)
+  const range = { startMs: settings.rangeStartMs, endMs: settings.rangeEndMs }
   logExport('Starting export', {
     projectId: snapshot.id,
     aspectRatio: snapshot.canvas.aspectRatio,
+    mode: settings.mode,
+    quality: settings.quality,
   })
   throwIfCanceled(signal)
 
-  const durationMs = exportDurationMs(snapshot)
-  const spans = audioSpansForExport(snapshot)
-  const frameCount = exportFrameCount(durationMs)
+  const spans = audioSpansForExport(snapshot, range)
+  const frameRate = settings.frameRate
+  const frameCount = settings.mode === 'video' ? exportFrameCount(durationMs, frameRate) : 0
   logExport('Snapshot created', {
     durationMs,
     clips: snapshot.clips.length,
@@ -94,16 +104,27 @@ export async function renderProjectExport(
     video: frameCount > 0,
     audio: spans.length > 0,
   })
-  if (durationMs <= 0 || frameCount === 0) {
+  if (durationMs <= 0 || (settings.mode === 'video' && frameCount === 0)) {
     throw new ExportFailure(emptyTimelineMessage())
   }
+  if (settings.mode === 'audio' && spans.length === 0) {
+    throw new ExportFailure('Export failed because this range has no audio to write.')
+  }
 
-  const size = exportSizeFor(snapshot.canvas.aspectRatio)
+  const size = { width: settings.width, height: settings.height }
   onProgress({ phase: 'preparing', fraction: null })
 
-  const blocker = await mp4ExportBlocker(browserMp4Probe(), size, spans.length > 0)
-  throwIfCanceled(signal)
-  if (blocker) throw new ExportFailure(blocker)
+  if (settings.mode === 'video') {
+    const { videoBitrate, audioBitrate } = QUALITY_PRESETS[settings.quality]
+    const blocker = await mp4ExportBlocker(
+      browserMp4Probe({ videoBitrate, audioBitrate }),
+      size,
+      spans.length > 0,
+      frameRate,
+    )
+    throwIfCanceled(signal)
+    if (blocker) throw new ExportFailure(blocker)
+  }
 
   logExport('Media preparation started', {
     sources: requiredMediaSources(snapshot).map((source) => ({
@@ -114,7 +135,7 @@ export async function renderProjectExport(
       hasAudio: source.hasAudio,
     })),
   })
-  const required = requiredMediaSources(snapshot)
+  const required = requiredMediaSources(snapshot, settings.mode === 'audio' ? range : range)
   const blobs = new Map<string, Blob>()
   const missing: { name: string }[] = []
   for (const source of required) {
@@ -137,18 +158,6 @@ export async function renderProjectExport(
   const byId = new Map<string, OpenedMedia>()
   let output: Output | null = null
   let pendingAudio: AudioSample[] = []
-
-  const canvas = createCanvas(size.width, size.height)
-  const context = drawingContext(canvas)
-  if (!context) {
-    throw new ExportFailure('Export failed because this browser could not create a drawing surface.')
-  }
-  context.imageSmoothingEnabled = true
-  logExport('Renderer started', {
-    canvasWidth: canvas.width,
-    canvasHeight: canvas.height,
-    aspectRatio: snapshot.canvas.aspectRatio,
-  })
 
   try {
     const open = async (mediaSourceId: string, mediaName: string) => {
@@ -179,17 +188,48 @@ export async function renderProjectExport(
       }
     }
 
+    if (settings.mode === 'audio') {
+      const mixed = await mixSpans({ spans, open, signal, durationMs })
+      const wav = encodeWavPcm({
+        left: mixed.left,
+        right: mixed.right,
+        sampleRate: EXPORT_SAMPLE_RATE,
+      })
+      const wavBytes = new ArrayBuffer(wav.byteLength)
+      new Uint8Array(wavBytes).set(wav)
+      logExport('Export completed', { bytes: wavBytes.byteLength, mime: 'audio/wav' })
+      return {
+        blob: new Blob([wavBytes], { type: 'audio/wav' }),
+        filename: exportFilename(snapshot.name, 'wav'),
+      }
+    }
+
+    const canvas = createCanvas(size.width, size.height)
+    const context = drawingContext(canvas)
+    if (!context) {
+      throw new ExportFailure('Export failed because this browser could not create a drawing surface.')
+    }
+    context.imageSmoothingEnabled = true
+    logExport('Renderer started', {
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      aspectRatio: snapshot.canvas.aspectRatio,
+    })
+
+    const bitrates = QUALITY_PRESETS[settings.quality]
     const target = new BufferTarget()
     output = new Output({
       format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
       target,
     })
-    const videoSource = new CanvasSource(canvas, videoExportEncoding())
+    const videoSource = new CanvasSource(canvas, videoExportEncoding(bitrates.videoBitrate))
     output.addVideoTrack(videoSource)
     logExport('Video encoder initialized', {
       codec: 'avc',
+      bitrate: bitrates.videoBitrate,
       width: canvas.width,
       height: canvas.height,
+      frameRate,
     })
 
     if (spans.length > 0) {
@@ -207,14 +247,17 @@ export async function renderProjectExport(
       } finally {
         await audioContext.close()
       }
-      const audioSource = new AudioSampleSource(audioExportEncoding())
+      const audioSource = new AudioSampleSource(audioExportEncoding(bitrates.audioBitrate))
       output.addAudioTrack(audioSource)
       logExport('Audio encoder initialized', { codec: 'aac', spans: spans.length })
       await output.start()
       for (const sample of pendingAudio) {
-        throwIfCanceled(signal)
-        await audioSource.add(sample)
-        sample.close()
+        try {
+          throwIfCanceled(signal)
+          await audioSource.add(sample)
+        } finally {
+          sample.close()
+        }
       }
       pendingAudio = []
     } else {
@@ -222,7 +265,7 @@ export async function renderProjectExport(
       await output.start()
     }
 
-    const jobs = frameJobs(snapshot, durationMs)
+    const jobs = frameJobs(snapshot, durationMs, frameRate, settings.rangeStartMs)
     onProgress({ phase: 'rendering', fraction: 0 })
     logExport('Rendering started', { frames: jobs.length })
     let completed = 0
@@ -260,30 +303,33 @@ export async function renderProjectExport(
       const frames = media.video.samplesAtTimestamps(run.map((item) => item.sourceSec))
       try {
         for (const item of run) {
-          throwIfCanceled(signal)
           let sample: Awaited<ReturnType<typeof frames.next>>['value'] | null = null
           try {
-            const step = await frames.next()
-            sample = step.value ?? null
-          } catch (error) {
-            throwDecodeFailure(error, job.mediaName)
+            throwIfCanceled(signal)
+            try {
+              const step = await frames.next()
+              sample = step.value ?? null
+            } catch (error) {
+              throwDecodeFailure(error, job.mediaName)
+            }
+            paintBackground(context, size.width, size.height)
+            if (sample) {
+              sample.drawWithFit(context, { fit: 'contain' })
+              drawn += 1
+            }
+            await videoSource.add(item.timestampSec, item.durationSec)
+            completed += 1
+            if (completed - lastLoggedFrame >= 30) {
+              lastLoggedFrame = completed
+              logExport('Rendering frame/segment', {
+                completed,
+                total: jobs.length,
+              })
+            }
+            onProgress({ phase: 'rendering', fraction: completed / jobs.length })
+          } finally {
+            sample?.close()
           }
-          paintBackground(context, size.width, size.height)
-          if (sample) {
-            sample.drawWithFit(context, { fit: 'contain' })
-            sample.close()
-            drawn += 1
-          }
-          await videoSource.add(item.timestampSec, item.durationSec)
-          completed += 1
-          if (completed - lastLoggedFrame >= 30) {
-            lastLoggedFrame = completed
-            logExport('Rendering frame/segment', {
-              completed,
-              total: jobs.length,
-            })
-          }
-          onProgress({ phase: 'rendering', fraction: completed / jobs.length })
         }
       } finally {
         await frames.return(undefined)
@@ -304,12 +350,12 @@ export async function renderProjectExport(
     logExport('Export completed', {
       bytes: buffer.byteLength,
       mime,
-      filename: exportFilename(snapshot.name),
+      filename: exportFilename(snapshot.name, 'mp4'),
     })
     output = null
     return {
       blob: new Blob([buffer], { type: EXPORT_CONTAINER }),
-      filename: exportFilename(snapshot.name),
+      filename: exportFilename(snapshot.name, 'mp4'),
     }
   } catch (error) {
     logExportError(error)
@@ -329,7 +375,7 @@ async function mixSpans(args: {
   signal: AbortSignal
   durationMs: number
 }): Promise<{ left: Float32Array; right: Float32Array }> {
-  const length = Math.max(1, timelineSampleOffset(args.durationMs))
+  const length = Math.max(1, exportAudioSampleCount(args.durationMs))
   const left = new Float32Array(length)
   const right = new Float32Array(length)
   let wrote = 0
@@ -342,39 +388,39 @@ async function mixSpans(args: {
     const sourceOutSec = span.sourceOutMs / 1000
     try {
       for await (const sample of media.audio.samples(sourceInSec, sourceOutSec)) {
-        throwIfCanceled(args.signal)
-        const used = trimToRange(sample, sourceInSec, sourceOutSec)
-        if (!used) {
+        let used: AudioSample | null = null
+        try {
+          throwIfCanceled(args.signal)
+          used = trimToRange(sample, sourceInSec, sourceOutSec)
+          if (!used) continue
+          const planes = readPlanar(used)
+          const timelineStartSec = audioMixTimelineSec({
+            timelineStartMs: span.timelineStartMs,
+            sourceInMs: span.sourceInMs,
+            sampleTimestampSec: used.timestamp,
+          })
+          const primary = planes[0]
+          if (primary) {
+            mixIntoTimeline({
+              destination: left,
+              source: primary,
+              sourceRate: used.sampleRate,
+              destinationRate: EXPORT_SAMPLE_RATE,
+              timelineStartSec,
+            })
+            mixIntoTimeline({
+              destination: right,
+              source: planes[1] ?? primary,
+              sourceRate: used.sampleRate,
+              destinationRate: EXPORT_SAMPLE_RATE,
+              timelineStartSec,
+            })
+            wrote += used.numberOfFrames
+          }
+        } finally {
+          if (used && used !== sample) used.close()
           sample.close()
-          continue
         }
-        const planes = readPlanar(used)
-        const timelineMs = placedAudioTimelineMs({
-          timelineStartMs: span.timelineStartMs,
-          sourceInMs: span.sourceInMs,
-          sampleTimestampSec: used.timestamp,
-        })
-        const offset = timelineSampleOffset(timelineMs)
-        const primary = planes[0]
-        if (primary) {
-          mixIntoTimeline({
-            destination: left,
-            source: primary,
-            sourceRate: used.sampleRate,
-            destinationRate: EXPORT_SAMPLE_RATE,
-            destinationOffset: offset,
-          })
-          mixIntoTimeline({
-            destination: right,
-            source: planes[1] ?? primary,
-            sourceRate: used.sampleRate,
-            destinationRate: EXPORT_SAMPLE_RATE,
-            destinationOffset: offset,
-          })
-          wrote += used.numberOfFrames
-        }
-        if (used !== sample) sample.close()
-        used.close()
       }
     } catch (error) {
       throwDecodeFailure(error, span.mediaName)
@@ -425,12 +471,14 @@ function readPlanar(sample: AudioSample): Float32Array[] {
 function frameJobs(
   snapshot: ExportRequest['snapshot'],
   durationMs: number,
+  frameRate: number,
+  rangeStartMs: number,
 ): FrameJob[] {
-  const count = exportFrameCount(durationMs)
+  const count = exportFrameCount(durationMs, frameRate)
   const jobs: FrameJob[] = []
   for (let index = 0; index < count; index += 1) {
-    const window = exportFrameWindow(index, count, durationMs)
-    const picture = pictureAt(snapshot, window.timelineMs)
+    const window = exportFrameWindow(index, count, durationMs, frameRate)
+    const picture = pictureAt(snapshot, rangeStartMs + window.timelineMs)
     if (picture.kind === 'gap') {
       jobs.push({
         kind: 'gap',

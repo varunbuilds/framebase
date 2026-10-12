@@ -14,6 +14,7 @@ export type EditorOperation =
   | { type: 'media.add'; source: MediaSource }
   | { type: 'media.remove'; mediaSourceId: string }
   | { type: 'track.add'; track: Track }
+  | { type: 'track.update'; trackId: string; muted?: boolean; locked?: boolean }
   | { type: 'track.remove'; trackId: string }
   | { type: 'clip.add'; clip: Clip }
   | {
@@ -59,6 +60,8 @@ export function applyOperation(
       return applyMediaRemove(document, operation.mediaSourceId)
     case 'track.add':
       return applyTrackAdd(document, operation.track)
+    case 'track.update':
+      return applyTrackUpdate(document, operation)
     case 'track.remove':
       return applyTrackRemove(document, operation.trackId)
     case 'clip.add':
@@ -145,6 +148,28 @@ function applyTrackAdd(document: ProjectDocument, track: Track): ApplyResult {
   return {
     ok: true,
     document: { ...document, tracks: [...document.tracks, track] },
+  }
+}
+
+function applyTrackUpdate(
+  document: ProjectDocument,
+  operation: Extract<EditorOperation, { type: 'track.update' }>,
+): ApplyResult {
+  const track = getTrackById(document, operation.trackId)
+  if (!track) return { ok: false, error: 'Track not found.' }
+  const muted = operation.muted ?? track.muted
+  const locked = operation.locked ?? track.locked
+  if (muted === track.muted && locked === track.locked) {
+    return { ok: true, document }
+  }
+  return {
+    ok: true,
+    document: {
+      ...document,
+      tracks: document.tracks.map((item) =>
+        item.id === track.id ? { ...item, muted, locked } : item,
+      ),
+    },
   }
 }
 

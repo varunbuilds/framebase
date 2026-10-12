@@ -1,4 +1,4 @@
-import { Camera, Film, Link2, Link2Off, MousePointer2, Music2, Redo2, Scissors, Undo2, ZoomIn, ZoomOut } from 'lucide-react'
+import { Camera, Link2, Link2Off, MousePointer2, Redo2, Scissors, Undo2, ZoomIn, ZoomOut } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -12,6 +12,8 @@ import {
   type DragEvent as ReactDragEvent,
 } from 'react'
 import { AudioWaveform } from '@/components/timeline/AudioWaveform'
+import { AddTrackMenu } from '@/components/timeline/AddTrackMenu'
+import { TrackHeader } from '@/components/timeline/TrackHeader'
 import {
   canLinkClipSelection,
   canUnlinkClipSelection,
@@ -2019,7 +2021,9 @@ export function TimelinePanel() {
           }}
         >
           {/* Above sticky labels so vertical scroll never paints titles over the corner */}
-          <div className="sticky top-0 left-0 z-50 border-r border-b border-fb-border bg-fb-panel" />
+          <div className="sticky top-0 left-0 z-50 border-r border-b border-fb-border bg-fb-panel">
+            <AddTrackMenu />
+          </div>
 
           <div
             className="sticky top-0 z-30 cursor-ew-resize border-b border-fb-border bg-fb-ruler"
@@ -2058,18 +2062,7 @@ export function TimelinePanel() {
 
           <div className="sticky left-0 z-40 border-r border-fb-border bg-fb-panel">
             {displayTracks.map((track) => (
-              <div
-                key={track.id}
-                className="flex items-center gap-2 border-b border-fb-border bg-fb-panel px-2 text-[11px] font-medium text-fb-muted"
-                style={{ height: TRACK_HEIGHT }}
-              >
-                {track.kind === 'video' ? (
-                  <Film size={14} strokeWidth={1.6} />
-                ) : (
-                  <Music2 size={14} strokeWidth={1.6} />
-                )}
-                {track.name}
-              </div>
+              <TrackHeader key={track.id} track={track} />
             ))}
           </div>
 
@@ -2083,6 +2076,8 @@ export function TimelinePanel() {
               <div
                 key={track.id}
                 className={`relative border-b border-fb-border ${
+                  track.muted ? 'opacity-45' : ''
+                } ${
                   mediaDrop?.trackId === track.id ||
                   (isClipMoving && dragPreferredTrackId === track.id)
                     ? 'bg-white/[0.045]'

@@ -1618,6 +1618,81 @@ html.media-dragging * {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.track-add-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(243, 244, 244, 0.62);
+  cursor: pointer;
+}
+
+.track-add-trigger:hover,
+.track-add-trigger.is-open {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f4f4f4;
+}
+
+.track-add-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 6px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 148px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #16181c;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.track-add-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: #f4f4f4;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.track-add-option:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.track-header-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(243, 244, 244, 0.55);
+  cursor: pointer;
+}
+
+.track-header-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f4f4;
+}
+
+.track-header-btn.is-active {
+  background: rgba(62, 126, 204, 0.18);
+  color: #7eb0e8;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-btn,
   .app-field,

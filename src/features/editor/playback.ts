@@ -18,8 +18,8 @@ import { clamp } from '@/utils/time'
  * through to the next video track. Audio tracks never supply the picture.
  *
  * One HTML video element still plays that clip. This is not compositing.
- * Muted and locked do not hide a video clip; those flags are not part of
- * preview selection today.
+ * A muted video track is disabled: its clips are skipped and the picture
+ * falls through to the next video track. Lock does not hide a clip.
  *
  * A project with no video tracks still plays its lowest-order audio track.
  */
@@ -117,7 +117,7 @@ export function resolveActiveVideoClip(
 ): ActiveVideoClip | null {
   const timelineTimeMs = Math.max(0, Math.round(playheadMs))
   const videoTracks = getSortedTracks(document).filter(
-    (track) => track.kind === 'video',
+    (track) => track.kind === 'video' && !track.muted,
   )
 
   for (const track of videoTracks) {
@@ -348,7 +348,7 @@ export type TimelineAudioItem = {
  *
  * A video file's embedded audio is included only when no audio-track clip
  * refers to that same media source. A muted audio track still counts, so
- * muting it does not fall back to the video file.
+ * A muted video track is disabled, so its picture and embedded audio are both skipped.
  */
 export function collectTimelineAudio(document: ProjectDocument): {
   representedSourceIds: ReadonlySet<string>
@@ -370,7 +370,7 @@ export function collectTimelineAudio(document: ProjectDocument): {
 
   for (const clip of document.clips) {
     const track = document.tracks.find((item) => item.id === clip.trackId)
-    if (!track || track.kind !== 'video') continue
+    if (!track || track.kind !== 'video' || track.muted) continue
     const source = getMediaSourceById(document, clip.mediaSourceId)
     if (!source?.hasAudio || representedSourceIds.has(source.id)) continue
     embeddedVideoClips.push({ clip, source })
@@ -386,7 +386,9 @@ export function videoSourceUsesEmbeddedAudio(
 ): boolean {
   const source = getMediaSourceById(document, mediaSourceId)
   if (!source?.hasAudio) return false
-  return !collectTimelineAudio(document).representedSourceIds.has(mediaSourceId)
+  const audio = collectTimelineAudio(document)
+  if (audio.representedSourceIds.has(mediaSourceId)) return false
+  return audio.embeddedVideoClips.some((item) => item.source.id === mediaSourceId)
 }
 
 export type AudioCue = {
