@@ -5,6 +5,7 @@ import { useEditorStore } from '@/stores/editor-store'
 import { exportDurationMs } from './export-plan'
 import { browserMp4Probe } from './export-capabilities'
 import { reportExportError } from './export-log'
+import { explainExportBlock, exportClickResult } from './export-session'
 import {
   EXPORT_FRAME_RATES,
   QUALITY_PRESETS,
@@ -58,13 +59,12 @@ export function ExportDialog({
   const estimate = formatByteEstimate(estimateOutputBytes(applied))
   const filename = exportDownloadName(applied, document.name)
   const extension = applied.mode === 'audio' ? 'wav' : 'mp4'
-  const blocking = readiness.issues.filter((issue) => issue.level === 'block')
+  const blocking = readiness.issues.filter(
+    (issue) => issue.level === 'block' && !issue.message.startsWith('Checking'),
+  )
   const warnings = readiness.issues.filter((issue) => issue.level === 'warn')
-  const checking = blocking.some((issue) => issue.message.startsWith('Checking'))
-  const blockMessage = !fileBaseName.trim()
-    ? 'Enter a file name.'
-    : (blocking[0]?.message ?? null)
-  const canExport = readiness.ready && fileBaseName.trim().length > 0
+  const checking = readiness.issues.some((issue) => issue.message.startsWith('Checking'))
+  const blockMessage = blocking[0] ? explainExportBlock(blocking[0].message) : null
   const latestJob = queue.items.at(-1) ?? null
 
   useEffect(() => {
@@ -108,11 +108,16 @@ export function ExportDialog({
 
   const patch = (next: Partial<ExportSettings>) => setSettings((current) => ({ ...current, ...next }))
 
-  const exportFile = () => {
-    if (!canExport) return
+  const exportFile = (kind: 'now' | 'queue') => {
+    const result = exportClickResult({ settings: applied, readiness })
+    if (result.type === 'blocked') {
+      setActionError(result.message)
+      return
+    }
     setActionError(null)
     try {
-      queue.enqueue(applied)
+      if (kind === 'now') queue.startNow(result.settings)
+      else queue.addToQueue(result.settings)
     } catch (error) {
       setActionError(reportExportError(error).message || 'Export could not start.')
     }
@@ -121,20 +126,21 @@ export function ExportDialog({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4 py-8"
-      onMouseDown={onClose}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        onMouseDown={(event) => event.stopPropagation()}
         className="flex max-h-[min(760px,100%)] w-full max-w-[520px] flex-col border border-white/15 bg-[#0b1016]"
       >
         <form
           className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault()
-            exportFile()
+            exportFile('now')
           }}
         >
           <div className="min-h-0 flex-1 overflow-auto p-5">
@@ -308,17 +314,26 @@ export function ExportDialog({
 
           <div className="border-t border-white/10 px-5 py-4">
             <FooterStatus
-              checking={checking}
+              checking={checking && !actionError && !blockMessage}
               blocked={actionError ?? blockMessage}
-              job={actionError ? null : latestJob}
+              job={latestJob}
               runningLabel={queue.label}
+              onRetry={latestJob ? () => queue.retry(latestJob.id) : undefined}
             />
             <div className="flex items-center justify-end gap-2">
               <button type="button" onClick={onClose} className="app-btn-quiet mr-auto">
                 Close
               </button>
-              <button type="submit" className="app-btn" disabled={!canExport}>
-                {queue.running ? 'Exporting…' : checking ? 'Checking…' : 'Export'}
+              <button
+                type="button"
+                className="app-btn-quiet"
+                disabled={queue.running}
+                onClick={() => exportFile('queue')}
+              >
+                Add to queue
+              </button>
+              <button type="submit" className="app-btn" disabled={queue.running}>
+                {queue.running ? 'Exporting…' : applied.mode === 'video' ? 'Export Video' : 'Export Audio'}
               </button>
             </div>
           </div>
@@ -333,41 +348,51 @@ function FooterStatus({
   blocked,
   job,
   runningLabel,
+  onRetry,
 }: {
   checking: boolean
   blocked: string | null
   job: ExportQueueItem | null
   runningLabel: string
+  onRetry?: () => void
 }) {
-  if (blocked) {
-    return (
-      <p className={`mb-3 text-[12px] ${checking && !blocked.startsWith('Enter') ? 'text-fb-muted' : 'text-fb-danger'}`} role="alert">
-        {blocked}
-      </p>
-    )
-  }
-  if (!job) return null
-  const failed = job.status === 'failed'
-  const text =
-    job.status === 'running'
+  const failed = job?.status === 'failed'
+  const percent = job?.status === 'running' && job.progress != null ? Math.round(job.progress * 100) : null
+  const jobText =
+    job?.status === 'running'
       ? `${job.filename} · ${runningLabel}`
-      : job.status === 'queued'
+      : job?.status === 'queued'
         ? `${job.filename} · Waiting`
-        : job.status === 'completed'
+        : job?.status === 'completed'
           ? `${job.filename} is ready.`
-          : job.status === 'cancelled'
+          : job?.status === 'cancelled'
             ? `${job.filename} canceled.`
-            : (job.message ?? 'Export failed.')
-  const percent = job.status === 'running' && job.progress != null ? Math.round(job.progress * 100) : null
+            : job?.status === 'failed'
+              ? (job.message ?? 'Export failed.')
+              : null
+  if (!blocked && !jobText && !checking) return null
   return (
     <div className="mb-3">
-      <p className={`text-[12px] ${failed ? 'text-fb-danger' : 'text-fb-muted'}`} role="status">
-        {text}
-      </p>
-      {job.status === 'running' && (
+      {checking && <p className="text-[12px] text-fb-muted">Checking this browser.</p>}
+      {blocked && (
+        <p className="text-[12px] text-fb-danger" role="alert">
+          {blocked}
+        </p>
+      )}
+      {jobText && (
+        <p className={`text-[12px] ${failed ? 'text-fb-danger' : 'text-fb-muted'}`} role="status">
+          {jobText}
+        </p>
+      )}
+      {job?.status === 'running' && percent != null && (
         <div className="mt-2 h-1 bg-white/10" aria-hidden="true">
-          <div className="h-full bg-fb-accent" style={{ width: `${percent ?? 8}%` }} />
+          <div className="h-full bg-fb-accent" style={{ width: `${percent}%` }} />
         </div>
+      )}
+      {failed && onRetry && (
+        <button type="button" className="app-btn-quiet mt-2 h-8 px-0 text-[12px]" onClick={onRetry}>
+          Retry
+        </button>
       )}
     </div>
   )
@@ -480,12 +505,9 @@ function ExportRow({
           </button>
         )}
       </div>
-      {item.status === 'running' && (
+      {item.status === 'running' && percent != null && (
         <div className="mt-2 h-1 bg-white/10" aria-hidden="true">
-          <div
-            className="h-full bg-fb-accent"
-            style={{ width: `${percent ?? 8}%` }}
-          />
+          <div className="h-full bg-fb-accent" style={{ width: `${percent}%` }} />
         </div>
       )}
     </li>
